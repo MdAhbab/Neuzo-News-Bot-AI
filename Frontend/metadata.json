@@ -1,0 +1,5 @@
+{
+  "name": "Neuzo Agentic News Bot",
+  "description": "An agentic news bot that allows users to select a news category, watch the agent gather and synthesize news in real-time, and download a final report.",
+  "requestFramePermissions": []
+}
