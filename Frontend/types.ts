@@ -10,6 +10,17 @@ export enum AppState {
   JOB_HISTORY,
 }
 
+export type NewsEngine = 'auto' | 'newsapi' | 'crawler';
+
+export interface ApiCategory {
+  id: number;
+  category_id: string;
+  name: string;
+  icon_name: string;
+  is_custom: boolean;
+  defaultSources: string[];
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -31,6 +42,8 @@ export interface Job {
   usedSources?: string[];
   agentActions?: string[];
   partialReportContent?: string;
+  articlesCount?: number;
+  verifiedCount?: number;
 }
 
 // Enhanced job history item from API

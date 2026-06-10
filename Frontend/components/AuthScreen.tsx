@@ -1,9 +1,10 @@
 import React, { useState, FormEvent } from 'react';
+import type { User } from '../types';
 import { UserCircleIcon, LockClosedIcon, BotIcon } from './icons';
 import * as NeuzoApi from '../services/neuzoApi';
 
 interface AuthScreenProps {
-  onAuthSuccess: () => void;
+  onAuthSuccess: (user: User) => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
@@ -33,15 +34,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     setLoading(true);
     
     try {
+      let data;
       if (isLogin) {
-        await NeuzoApi.login(email, password);
+        data = await NeuzoApi.login(email, password);
       } else {
-        await NeuzoApi.signup(email, password, fullName || undefined);
+        data = await NeuzoApi.signup(email, password, fullName || undefined);
       }
-      
-      onAuthSuccess();
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+
+      onAuthSuccess(data.user);
+    } catch (err: unknown) {
+      const err_ = err as { message?: string };
+      setError(err_.message || 'Authentication failed');
     } finally {
       setLoading(false);
     }

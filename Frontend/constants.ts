@@ -1,6 +1,17 @@
 
+import type React from 'react';
 import type { Category } from './types';
 import { CpuChipIcon, GlobeAltIcon, ChartBarIcon, HealthIcon, FireIcon, SparklesIcon, NewspaperIcon } from './components/icons';
+
+export const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
+  CpuChipIcon,
+  GlobeAltIcon,
+  ChartBarIcon,
+  HealthIcon,
+  FireIcon,
+  SparklesIcon,
+  NewspaperIcon,
+};
 
 export const CATEGORIES: Category[] = [
   { 

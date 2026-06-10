@@ -14,10 +14,18 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({ category, isSelected
   const selectedClasses = "ring-2 ring-blue-500 bg-white/10 border-transparent shadow-2xl scale-105";
   const unselectedClasses = "border border-white/10";
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick(category.id);
+    }
+  };
+
   return (
     <div
       className={`${baseClasses} ${isSelected ? selectedClasses : unselectedClasses}`}
       onClick={() => onClick(category.id)}
+      onKeyDown={handleKeyDown}
       role="button"
       aria-pressed={isSelected}
       tabIndex={0}

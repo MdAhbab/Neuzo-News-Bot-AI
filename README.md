@@ -1,6 +1,6 @@
-# Neuzo - Agentic News Bot
+# Neuzo — Agentic News Bot
 
-An intelligent news aggregation and verification system that fetches, verifies, and synthesizes news articles using advanced Natural Language Processing (NLP) and Machine Learning.
+An intelligent news aggregation and verification system that fetches, verifies, and synthesizes news articles into professional Word reports — using NLP cross-referencing and, optionally, a fully on-device agentic crawler powered by a local LLM.
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
@@ -10,22 +10,18 @@ An intelligent news aggregation and verification system that fetches, verifies, 
 ## 🚀 Quick Start
 
 ```bash
-# 1. Clone and setup
+# 1. Clone and run the automated setup
 python setup.py
 
-# 2. Configure (edit config.yaml with your settings)
-#    - Set database password
-#    - Add your NewsAPI key from https://newsapi.org/
+# 2. Start the backend
+.\.venv\Scripts\Activate.ps1      # Windows  (Linux/Mac: source .venv/bin/activate)
+python backend/api_server.py
 
-# 3. Start the backend
-.\.venv\Scripts\Activate.ps1  # Windows
-python api_server.py
-
-# 4. Start the frontend (new terminal)
+# 3. Start the frontend (new terminal)
 cd Frontend
 npm run dev
 
-# 5. Open http://localhost:3000 and login with:
+# 4. Open http://localhost:3000 and log in with:
 #    Email: test@neuzo.com | Password: test123
 ```
 
@@ -35,810 +31,251 @@ npm run dev
 
 Neuzo is a full-stack application that:
 
-- **Fetches** real-time news from NewsAPI based on user-selected categories
+- **Fetches** real-time news from NewsAPI **or** a self-hosted agentic crawler (no API quota)
+- **Curates** crawled articles with a local Ollama LLM (relevance filtering + summaries)
 - **Verifies** news authenticity using NLP semantic similarity analysis
 - **Synthesizes** comprehensive reports with confidence scores
 - **Generates** professional Word documents with verified articles
-- **Provides** a modern React frontend for seamless user interaction
+- **Provides** a modern React frontend with report history and live job progress
 
-### 🔒 Security Features (v2.0)
+### News engines
 
-- **Bcrypt password hashing** - Industry-standard password security
-- **Session expiration** - 24-hour token TTL with Redis support
-- **Rate limiting** - Protection against brute force attacks
-- **Input validation** - Email format and password strength checks
+| Engine | How it works | When to use |
+|---|---|---|
+| `newsapi` | NewsAPI top headlines (needs an API key, 100 req/day free) | Fast, broad coverage |
+| `crawler` | Discovers RSS/Atom feeds on your selected sources, fetches concurrently, optionally curates with a local Ollama model | No quota, fully on-device |
+| `auto` (default) | NewsAPI first; falls back to the crawler on quota errors, empty results, or a missing key | Best of both |
+
+The engine can be chosen per-report in the UI, or set globally via `news_pipeline.provider` in [backend/config.yaml](backend/config.yaml).
+
+### Local LLM (Ollama)
+
+The crawler can use a locally hosted model (default `gemma4:e4b`) as an editorial agent: it filters articles for category relevance and writes clean two-sentence summaries. This is the **only** feature that talks to Ollama — verification still uses sentence-transformers.
+
+```bash
+# Optional: install Ollama (https://ollama.com) and pull the model
+ollama pull gemma4:e4b
+```
+
+If Ollama is not running, the crawler simply skips curation and returns raw articles — nothing breaks.
 
 ---
 
 ## 🏗️ Architecture
 
-### System Components
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     NEUZO ARCHITECTURE                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────┐      ┌──────────────┐     ┌────────────┐ │
-│  │   Frontend   │──────│  Flask API   │─────│   MySQL    │ │
-│  │ React + TS   │      │   Backend    │     │  Database  │ │
-│  └──────────────┘      └──────────────┘     └────────────┘ │
-│         │                      │                             │
-│         │              ┌───────┴────────┐                   │
-│         │              │                 │                   │
-│         │      ┌───────▼──────┐  ┌─────▼──────┐           │
-│         │      │ News Fetcher │  │   Models   │           │
-│         │      │   (NewsAPI)  │  │ (Database) │           │
-│         │      └──────┬───────┘  └────────────┘           │
-│         │             │                                      │
-│         │      ┌──────▼─────────┐                          │
-│         │      │ News Verifier  │                          │
-│         │      │  (NLP + ML)    │                          │
-│         │      └──────┬─────────┘                          │
-│         │             │                                      │
-│         │      ┌──────▼──────────┐                         │
-│         └──────│   Document      │                         │
-│                │   Generator     │                         │
-│                └─────────────────┘                         │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                       NEUZO ARCHITECTURE                         │
+│                                                                  │
+│  ┌──────────────┐       ┌──────────────┐      ┌────────────┐    │
+│  │   Frontend   │──────▶│  Flask API   │─────▶│   MySQL    │    │
+│  │ React 19+TS  │       │   Backend    │      │  Database  │    │
+│  └──────────────┘       └──────┬───────┘      └────────────┘    │
+│                                │                                 │
+│                 ┌──────────────┼──────────────┐                  │
+│                 ▼              ▼              ▼                  │
+│        ┌──────────────┐ ┌────────────┐ ┌───────────────┐        │
+│        │ News Fetcher │ │   Local    │ │   Models      │        │
+│        │  (NewsAPI)   │ │  Crawler   │ │  (Database)   │        │
+│        └──────┬───────┘ └─────┬──────┘ └───────────────┘        │
+│               │               │ RSS discovery + Ollama          │
+│               └───────┬───────┘   (gemma4:e4b, optional)        │
+│                       ▼                                          │
+│              ┌────────────────┐      ┌─────────────────┐        │
+│              │ News Verifier  │─────▶│    Document     │        │
+│              │  (NLP + ML)    │      │    Generator    │        │
+│              └────────────────┘      └─────────────────┘        │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Technology Stack
 
-**Backend:**
+**Backend** — Python 3.13+, Flask 3 (REST API), MySQL 8 (connection-pooled), NewsAPI + RSS crawler, Sentence-Transformers (`all-MiniLM-L6-v2`), Ollama (optional, crawler-only), bcrypt, python-docx.
 
-- Python 3.13+
-- Flask 3.0+ (REST API)
-- MySQL 8.0+ (Database)
-- NewsAPI (News Source)
-- Sentence-Transformers (NLP)
-- Bcrypt (Password Security)
-
-**Frontend:**
-
-- React 19.2.0
-- TypeScript
-- Vite (Build Tool)
-- Tailwind CSS (Styling)
-
-**Machine Learning:**
-
-- Model: `sentence-transformers/all-MiniLM-L6-v2`
-- Framework: PyTorch
-- Task: Semantic Similarity Analysis
+**Frontend** — React 19, TypeScript, Vite, Tailwind CSS v4 (built, not CDN).
 
 ---
 
 ## 🤖 How It Works
 
-### 1. News Fetching Process
+### 1. News fetching
 
-```python
-# NewsFetcherAgent - news_fetcher.py
-┌─────────────────────────────────────────────┐
-│ 1. User selects category (Technology, etc.) │
-│ 2. System queries NewsAPI                   │
-│ 3. Fetches up to 100 articles               │
-│ 4. Parses metadata (title, description,     │
-│    source, URL, publish date)               │
-│ 5. Returns NewsArticle objects              │
-└─────────────────────────────────────────────┘
-```
+`backend/news_fetcher.py` (NewsAPI) and `backend/news_crawler.py` (local crawler):
 
-**NewsAPI Integration:**
+- **NewsAPI path**: one `top_headlines` request per job (page_size 100), sorted and trimmed locally. Quota errors are detected and trigger the crawler fallback in `auto` mode.
+- **Crawler path**: for each of the user's selected source URLs, the crawler discovers RSS/Atom feeds (`<link rel="alternate">` tags, then common paths like `/feed`, `/rss.xml`), fetches them concurrently with strict timeouts, dedupes by URL/title, and — when Ollama is available — asks the local model to keep only category-relevant articles and rewrite their summaries. Discovered feeds are cached per domain for the life of the process.
 
-- Endpoint: `get_top_headlines(category, language, page_size)`
-- Returns: JSON with articles
-- Free tier: Up to 100 requests/day
-- Fields used: title, description, source, url, publishedAt, content
+### 2. News verification
 
-### 2. News Verification Process
+`backend/news_verifier.py`:
 
-```python
-# NewsVerificationAgent - news_verifier.py
-┌──────────────────────────────────────────────────┐
-│ 1. Load NLP Model (all-MiniLM-L6-v2)            │
-│    - 384-dimensional embeddings                  │
-│    - Optimized for semantic similarity          │
-│                                                  │
-│ 2. Generate Embeddings                          │
-│    - Combine title + description                │
-│    - Encode using Sentence-Transformers         │
-│    - Create vector representations              │
-│                                                  │
-│ 3. Calculate Similarity Matrix                  │
-│    - Use cosine similarity                      │
-│    - Compare all articles against each other    │
-│    - Score: 0.0 (no match) to 1.0 (identical)  │
-│                                                  │
-│ 4. Verify Each Article                          │
-│    - Find similar articles (threshold > 0.3)    │
-│    - Base confidence: 60% for valid content     │
-│    - Boost confidence with similar sources      │
-│    - Final threshold: 70% for verification      │
-│                                                  │
-│ 5. Return VerificationResults                   │
-│    - verified: bool (true if confidence >= 0.7) │
-│    - confidence: float (0.0 to 1.0)             │
-│    - similar_sources: list of cross-references  │
-└──────────────────────────────────────────────────┘
-```
+1. Load the NLP model lazily on first use (cached process-wide afterwards)
+2. Embed `title + description` into 384-dim vectors
+3. Compute a cosine-similarity matrix (pure numpy)
+4. Score each article: 60% base confidence for well-formed content, boosted by up to 40% based on how strongly other outlets corroborate it
+5. Mark verified when confidence ≥ the configured threshold (default 0.7)
 
-**NLP Model Details:**
+**Model:** `sentence-transformers/all-MiniLM-L6-v2` — 22.7M params, ~90MB, ~3000 sentences/sec on CPU, no GPU required.
 
-- **Model:** sentence-transformers/all-MiniLM-L6-v2
-- **Type:** Transformer-based sentence encoder
-- **Size:** 22.7M parameters
-- **Speed:** ~3000 sentences/second on CPU
-- **Output:** 384-dimensional dense vectors
-- **Training:** Multi-Task Learning on 1B+ sentence pairs
+### 3. Document generation
 
-**Verification Algorithm:**
+`backend/document_generator.py` builds a Word document with an executive summary (verification rate, average confidence, top stories, coverage analysis), every verified article with its confidence score and cross-references, and a references/methodology section. Reports are saved to `backend/output/`.
 
-```python
-def verify_article(article):
-    # 1. Check content quality
-    has_content = bool(article.title and article.description)
-    
-    # 2. Find similar articles (cosine similarity > 0.3)
-    similar_articles = find_similar(article, threshold=0.3)
-    
-    # 3. Calculate confidence
-    base_confidence = 0.6  # 60% for having content
-    
-    if similar_articles:
-        avg_similarity = mean([s.similarity for s in similar_articles])
-        confidence = min(base_confidence + (avg_similarity * 0.4), 1.0)
-    else:
-        confidence = base_confidence
-    
-    # 4. Verify if confidence >= 0.7 (70%)
-    verified = confidence >= 0.7
-    
-    return VerificationResult(article, verified, confidence, similar_articles)
-```
-
-### 3. Document Generation Process
-
-```python
-# DocumentGenerator - document_generator.py
-┌─────────────────────────────────────────────────┐
-│ 1. Create Word Document                         │
-│    - Title: "Neuzo News Report"                 │
-│    - Metadata: Category, Date, Time             │
-│                                                  │
-│ 2. Generate Executive Summary                   │
-│    - Total articles analyzed                    │
-│    - Verification rate                          │
-│    - Average confidence score                   │
-│    - Top 5 verified stories                     │
-│    - Coverage analysis                          │
-│                                                  │
-│ 3. Add Verified Articles Section                │
-│    For each verified article:                   │
-│    - Title (Heading 2)                          │
-│    - Verification badge (✓ VERIFIED)            │
-│    - Confidence percentage                      │
-│    - Source name                                │
-│    - Publication date                           │
-│    - Full description                           │
-│    - Article URL                                │
-│    - Cross-references (similar articles)        │
-│                                                  │
-│ 4. Add References Section                       │
-│    - All unique news sources                    │
-│    - Verification methodology                   │
-│                                                  │
-│ 5. Save to output/neuzo_news_<category>_<timestamp>.docx │
-└─────────────────────────────────────────────────┘
-```
-
-### 4. Database Schema
-
-```sql
--- MySQL Database: neuzo_db
-┌─────────────────────────────────────────────────┐
-│                                                  │
-│  users                                           │
-│  ├── id (PK, AUTO_INCREMENT)                    │
-│  ├── email (UNIQUE)                             │
-│  ├── password_hash (SHA-256)                    │
-│  ├── full_name                                  │
-│  └── created_at                                 │
-│                                                  │
-│  categories                                      │
-│  ├── id (PK, AUTO_INCREMENT)                    │
-│  ├── category_id (UNIQUE, e.g., 'technology')  │
-│  ├── name (e.g., 'Technology')                  │
-│  ├── icon_name                                  │
-│  ├── is_custom                                  │
-│  └── created_by (FK -> users.id)               │
-│                                                  │
-│  news_sources                                    │
-│  ├── id (PK, AUTO_INCREMENT)                    │
-│  ├── category_id (FK -> categories.id)         │
-│  ├── source_url                                 │
-│  ├── source_name                                │
-│  ├── source_type (web, rss, api)               │
-│  ├── reliability_score (0.0 to 1.0)            │
-│  ├── is_active                                  │
-│  └── last_checked                               │
-│                                                  │
-│  user_categories                                 │
-│  ├── user_id (FK -> users.id)                  │
-│  └── category_id (FK -> categories.id)         │
-│                                                  │
-│  jobs                                            │
-│  ├── id (PK, AUTO_INCREMENT)                    │
-│  ├── job_id (UNIQUE, e.g., 'job-20251118...')  │
-│  ├── user_id (FK -> users.id)                  │
-│  ├── category_id (FK -> categories.id)         │
-│  ├── status (Pending, Processing, Complete)    │
-│  ├── step (current processing step)            │
-│  ├── sources_used (JSON array)                 │
-│  ├── report_path (file path)                   │
-│  ├── report_name (filename)                    │
-│  ├── articles_count                             │
-│  ├── verified_count                             │
-│  ├── created_at                                 │
-│  └── completed_at                               │
-│                                                  │
-└─────────────────────────────────────────────────┘
-```
-
-### 5. API Flow
+### 4. Job lifecycle
 
 ```
-User Action → Frontend → Backend API → Database/Services → Response
-```
+POST /api/jobs/start  →  job row created  →  background thread:
+  fetch (newsapi | crawler | auto) → verify (NLP) → generate .docx
+  → job marked Complete with articles_count / verified_count
 
-**Authentication Flow:**
-
-```
-1. POST /api/auth/signup
-   → Create user with SHA-256 hashed password
-   → Generate session token
-   → Store in active_sessions dictionary
-   → Return token to frontend
-   → Frontend stores in localStorage
-
-2. POST /api/auth/login
-   → Validate credentials
-   → Generate session token
-   → Return token
-
-3. All subsequent requests
-   → Include "Authorization: Bearer <token>" header
-   → @require_auth decorator validates token
-   → Proceed if valid, return 401 if invalid
-```
-
-**Report Generation Flow:**
-
-```
-1. POST /api/jobs/start
-   Body: { category: "technology", sources: [...] }
-   
-   → Create job record in database
-   → Start background thread for processing
-   → Return job_id immediately
-   
-2. Background Thread Processing:
-   Step 1: Initialize agent
-   Step 2: Fetch news from NewsAPI
-   Step 3: Parse articles
-   Step 4: Verify using NLP
-   Step 5: Detect duplicates
-   Step 6: Synthesize report
-   Step 7: Generate Word document
-   
-   → Update job status after each step
-   → Store report path in database
-   
-3. GET /api/jobs/<job_id>/status
-   → Poll every 2.5 seconds from frontend
-   → Return current status and step
-   → When complete, show download button
-   
-4. GET /api/jobs/<job_id>/download
-   → Validate authentication
-   → Verify job ownership
-   → Send .docx file with proper headers
+Frontend polls GET /api/jobs/<id>/status every 2.5s,
+then downloads via GET /api/jobs/<id>/download (Bearer auth, ownership-checked)
 ```
 
 ---
 
-## 📊 Data Flow Diagram
+## 📡 API Reference
 
-```
-┌─────────────┐
-│   User      │
-│  Browser    │
-└─────┬───────┘
-      │ 1. Login (email/password)
-      ▼
-┌─────────────────────────────┐
-│   Frontend (React)          │
-│  - AuthScreen               │
-│  - Category Selection       │
-│  - Source Management        │
-│  - Report View              │
-└─────┬───────────────────────┘
-      │ 2. POST /api/jobs/start
-      │    { category: "technology", sources: [...] }
-      ▼
-┌─────────────────────────────┐
-│   Flask API Server          │
-│  - Authentication           │
-│  - Job Management           │
-│  - Background Processing    │
-└─────┬───────────────────────┘
-      │ 3. Create job in DB
-      ▼
-┌─────────────────────────────┐
-│   MySQL Database            │
-│  - Store job record         │
-│  - Status: "Pending"        │
-└─────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────┐
-│  Background Thread          │
-│  1. NewsFetcherAgent        │
-│     ├─ Query NewsAPI        │
-│     └─ Return 20 articles   │
-│                             │
-│  2. NewsVerificationAgent   │
-│     ├─ Load NLP model       │
-│     ├─ Generate embeddings  │
-│     ├─ Calculate similarity │
-│     └─ Verify articles      │
-│                             │
-│  3. DocumentGenerator       │
-│     ├─ Create Word doc      │
-│     ├─ Add summary          │
-│     ├─ Add articles         │
-│     └─ Save to output/      │
-└─────┬───────────────────────┘
-      │ 4. Update job: Status="Complete"
-      ▼
-┌─────────────────────────────┐
-│   MySQL Database            │
-│  - Update report_path       │
-│  - Update verified_count    │
-└─────────────────────────────┘
-      │
-      │ 5. Frontend polls GET /api/jobs/<id>/status
-      ▼
-┌─────────────────────────────┐
-│   Frontend                  │
-│  - Show "Download Report"   │
-│  - Display summary          │
-└─────┬───────────────────────┘
-      │ 6. Click download
-      ▼
-┌─────────────────────────────┐
-│   GET /api/jobs/<id>/download│
-│  - Validate token           │
-│  - Send .docx file          │
-└─────────────────────────────┘
-```
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/signup` | — | Register (rate-limited 5/min) |
+| POST | `/api/auth/login` | — | Login (rate-limited 10/min) |
+| POST | `/api/auth/logout` | ✅ | Invalidate session |
+| GET | `/api/auth/me` | ✅ | Current user (session restore) |
+| GET | `/api/categories` | ✅ | Categories + default sources |
+| POST | `/api/categories` | ✅ | Create custom category |
+| GET/POST | `/api/sources/<category_id>` | ✅ | List / add news sources |
+| POST | `/api/jobs/start` | ✅ | Start report job (`{category, sources, engine}`) |
+| GET | `/api/jobs/<id>/status` | ✅ | Poll job progress |
+| GET | `/api/jobs/<id>/download` | ✅ | Download .docx (owner only) |
+| GET | `/api/jobs/history` | ✅ | User's past reports |
+| GET | `/api/health` | — | Health check |
 
 ---
 
-## 🔧 Setup Instructions
+## 🗄️ Database Schema
+
+MySQL database `neuzo_db` (see [backend/database_schema.sql](backend/database_schema.sql)):
+
+- **users** — id, email (unique), password_hash (bcrypt), full_name, timestamps
+- **categories** — category_id, name, icon_name, is_custom, created_by
+- **news_sources** — category FK, source_url, source_type (web/rss/api), reliability_score
+- **user_categories** — user ↔ category preferences
+- **jobs** — job_id, user FK, category FK, status, current_step, report path/name, sources_used, agent_actions, error_message, **articles_count**, **verified_count**, timestamps
+
+Older databases are migrated automatically at server start (missing columns are added idempotently).
+
+---
+
+## 🔧 Setup
 
 ### Prerequisites
 
-- **Python:** 3.13.7 or higher
-- **Node.js:** 18.0 or higher
-- **MySQL:** 8.0 or higher
-- **NewsAPI Key:** Free from [newsapi.org](https://newsapi.org/)
+- Python 3.13+, Node.js 18+, MySQL 8+
+- Optional: a [NewsAPI key](https://newsapi.org/) (free) and/or [Ollama](https://ollama.com) with `gemma4:e4b` for the local crawler
 
-### Installation
-
-Run the setup script:
+### Automated
 
 ```bash
 python setup.py
 ```
 
-This will:
+Checks prerequisites, creates the venv, installs backend + frontend dependencies, writes `backend/config.yaml`, imports the schema, and creates the `test@neuzo.com` test user.
 
-1. ✅ Check Python and Node.js versions
-2. ✅ Create Python virtual environment
-3. ✅ Install Python dependencies
-4. ✅ Install frontend dependencies
-5. ✅ Set up MySQL database
-6. ✅ Create configuration files
-7. ✅ Initialize database schema
-8. ✅ Create test user
-
-### Manual Setup (Alternative)
-
-If automated setup fails, follow these steps:
-
-**1. Backend Setup:**
+### Manual
 
 ```bash
-# Create virtual environment
+# Backend
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1            # or: source .venv/bin/activate
+pip install -r backend/requirements.txt
 
-# Activate (Windows)
-.\.venv\Scripts\Activate.ps1
+# Database
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS neuzo_db;"
+mysql -u root -p neuzo_db < backend/database_schema.sql
 
-# Activate (Linux/Mac)
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Frontend
+cd Frontend && npm install
 ```
 
-**2. Database Setup:**
+### Configuration
 
-```bash
-# Login to MySQL
-mysql -u root -p
+Defaults live in [backend/config.yaml](backend/config.yaml). **Every secret can be overridden via environment variables** (recommended for anything beyond local development) — copy [backend/.env.example](backend/.env.example) to `backend/.env`:
 
-# Create database and import schema
-CREATE DATABASE neuzo_db;
-USE neuzo_db;
-SOURCE database_schema.sql;
-EXIT;
-```
-
-**3. Configuration:**
-
-Edit `config.yaml`:
-
-```yaml
-database:
-  host: "localhost"
-  port: 3306
-  database: "neuzo_db"
-  user: "root"
-  password: "YOUR_MYSQL_PASSWORD"
-
-news_api:
-  api_key: "YOUR_NEWSAPI_KEY"
-```
-
-**4. Frontend Setup:**
-
-```bash
-cd Frontend
-npm install
-```
+| Variable | Overrides |
+|---|---|
+| `DATABASE_PASSWORD` (+ HOST/PORT/NAME/USER) | `database.*` |
+| `NEWSAPI_KEY` | `news_api.api_key` |
+| `NEWS_PROVIDER` (`auto`/`newsapi`/`crawler`) | `news_pipeline.provider` |
+| `OLLAMA_HOST`, `OLLAMA_MODEL` | `ollama.*` |
+| `SECRET_KEY`, `SESSION_EXPIRY_HOURS`, `REDIS_URL`, `PORT`, `FLASK_DEBUG` | Flask runtime |
 
 ---
 
-## 🚀 Running the Application
+## 🔒 Security
 
-### Start Backend
+- **bcrypt password hashing** (with SHA-256 pre-hash for >72-byte passwords; legacy SHA-256 hashes verify and can be migrated)
+- **Expiring sessions** — 24h TTL, in-memory with periodic cleanup, or Redis (`REDIS_URL`) for production
+- **Rate limiting** on auth endpoints (flask-limiter)
+- **Ownership checks** on job status/downloads; report paths never leave the server
+- **Parameterized SQL** everywhere; input validation on email, password length, source type, reliability score
+- **Debug off by default** — the server binds localhost unless `FLASK_DEBUG=true`
 
-```bash
-# Activate virtual environment
-.\.venv\Scripts\Activate.ps1
+---
 
-# Run Flask server
-python api_server.py
-```
-
-Server runs at: `http://localhost:5000`
-
-### Start Frontend
+## 🧪 Testing
 
 ```bash
-cd Frontend
-npm run dev
+cd backend
+..\.venv\Scripts\python.exe -m pytest tests -v
 ```
 
-Frontend runs at: `http://localhost:3000`
-
-### Access the Application
-
-1. Open browser: `http://localhost:3000`
-2. Login with test credentials:
-   - Email: `test@neuzo.com`
-   - Password: `test123`
-3. Select a category (Technology, Sports, etc.)
-4. Click "Generate Report"
-5. Wait for processing (~15-20 seconds)
-6. Download the Word document
+Covers password hashing, the similarity math, crawler JSON-decision parsing and deduplication, config env overrides, and the API auth/validation surface.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-Neuzo/
-├── api_server.py              # Flask REST API server
-├── database.py                # Database connection manager
-├── models.py                  # Database models (User, Job, etc.)
-├── news_fetcher.py            # NewsAPI integration
-├── news_verifier.py           # NLP verification engine
-├── document_generator.py      # Word document generator
-├── config.yaml                # Configuration file
-├── database_schema.sql        # MySQL schema with sample data
-├── requirements.txt           # Python dependencies
-├── setup.py                   # Automated setup script
-├── README.md                  # This file
-│
-├── Frontend/                  # React frontend
-│   ├── App.tsx                # Main React component
-│   ├── components/            # UI components
-│   │   ├── AuthScreen.tsx     # Login/signup
-│   │   ├── CategoryCard.tsx   # Category selection
-│   │   ├── ProcessingStatus.tsx # Progress indicator
-│   │   ├── ReportView.tsx     # Report display
-│   │   └── AddSourceModal.tsx # Add news sources
-│   ├── services/
-│   │   └── neuzoApi.ts        # API integration
-│   ├── package.json           # Node dependencies
-│   └── vite.config.ts         # Vite configuration
-│
-├── output/                    # Generated Word documents
-└── .venv/                     # Python virtual environment
+Neuzo-News-Bot-AI/
+├── setup.py                   # Automated installer
+├── backend/
+│   ├── api_server.py          # Flask REST API
+│   ├── config.py              # Config loader (.env + env overrides)
+│   ├── config.yaml            # Default configuration
+│   ├── database.py            # MySQL pool + migrations
+│   ├── models.py              # User / Category / NewsSource / Job
+│   ├── news_fetcher.py        # NewsAPI + RSS fetching
+│   ├── news_crawler.py        # Local agentic crawler (+ Ollama curation)
+│   ├── news_verifier.py       # NLP verification engine
+│   ├── document_generator.py  # Word document generator
+│   ├── database_schema.sql    # MySQL schema + seed data
+│   ├── requirements.txt       # Python dependencies (lean)
+│   ├── .env.example           # Environment variable template
+│   ├── output/                # Generated reports (gitignored)
+│   └── tests/                 # Pytest suite
+└── Frontend/                  # React app (see Frontend/README.md)
 ```
-
----
-
-## 🔍 Key Features
-
-### 1. Real-time News Fetching
-
-- Integrates with NewsAPI for live news data
-- Supports 6 categories: Technology, Business, Science, Health, Sports, World News
-- Fetches up to 100 articles per request
-
-### 2. AI-Powered Verification
-
-- Uses Sentence-Transformers for semantic analysis
-- Cross-references articles for authenticity
-- Calculates confidence scores (0-100%)
-- Identifies similar sources
-
-### 3. Intelligent Report Generation
-
-- Professional Word document formatting
-- Executive summary with key findings
-- Top 5 verified stories
-- Coverage analysis and insights
-- Complete references section
-
-### 4. User Management
-
-- Secure authentication with SHA-256
-- Session-based token management
-- User-specific job history
-- Custom category creation
-
-### 5. Source Management
-
-- Add custom news sources to database
-- Manage source reliability scores
-- Support for Web, RSS, and API sources
-
----
-
-## 🧠 Machine Learning Model Details
-
-### Sentence-Transformers: all-MiniLM-L6-v2
-
-**Architecture:**
-
-- Based on Microsoft's MiniLM
-- 6-layer transformer encoder
-- 384 hidden dimensions
-- 12 attention heads per layer
-
-**Training Data:**
-
-- 1 billion sentence pairs
-- Multi-task learning approach
-- Tasks: NLI, paraphrase detection, semantic similarity
-
-**Performance:**
-
-- Speed: ~3000 sentences/second (CPU)
-- Accuracy: 78.9% on STS benchmark
-- Memory: ~90MB model size
-
-**How It Works:**
-
-```python
-# 1. Tokenization
-input_text = "Google AI advances"
-tokens = tokenizer.encode(input_text)  # [101, 2054, 3058, ...]
-
-# 2. Embedding Generation
-hidden_states = transformer_model(tokens)  # [batch, seq_len, 384]
-
-# 3. Pooling (mean pooling)
-embedding = mean(hidden_states, dim=1)  # [384]
-
-# 4. Normalization
-embedding = normalize(embedding)  # L2 normalized vector
-
-# 5. Similarity Calculation
-similarity = cosine_similarity(embedding1, embedding2)
-# Returns: 0.0 (unrelated) to 1.0 (identical)
-```
-
-**Why This Model?**
-
-- ✅ Fast inference on CPU
-- ✅ Good balance of speed vs accuracy
-- ✅ Pre-trained on news/web text
-- ✅ Low memory footprint
-- ✅ No GPU required
-
----
-
-## 📈 Processing Steps Explained
-
-### Step 1: Initiating Agent
-
-- Initialize Flask background thread
-- Load configuration from config.yaml
-- Prepare job tracking
-
-### Step 2: Fetching News
-
-- Query NewsAPI with category filter
-- Parse JSON response
-- Extract: title, description, source, URL, publishedAt
-- Create NewsArticle objects
-
-### Step 3: Parsing Articles
-
-- Clean text (remove HTML, special chars)
-- Validate required fields
-- Structure data for verification
-
-### Step 4: Verifying News
-
-- Load Sentence-Transformer model
-- Generate 384-dim embeddings for each article
-- Calculate similarity matrix (cosine similarity)
-- Score each article based on cross-references
-- Assign confidence levels
-
-### Step 5: Detecting Duplicates
-
-- Identify articles with >80% similarity
-- Group related stories
-- Keep highest-confidence version
-
-### Step 6: Synthesizing Report
-
-- Aggregate verified articles
-- Calculate statistics
-- Generate insights
-- Prepare document structure
-
-### Step 7: Generating Document
-
-- Create Word document with python-docx
-- Add formatted sections
-- Include metadata and references
-- Save to output/ directory
-
----
-
-## 🔒 Security Features
-
-1. **Password Security:**
-   - SHA-256 hashing with salt
-   - Passwords never stored in plain text
-
-2. **Session Management:**
-   - Random 32-byte URL-safe tokens
-   - Token validation on every request
-   - Auto-expiration on server restart
-
-3. **API Security:**
-   - CORS enabled for localhost
-   - Authentication required for all endpoints
-   - User ownership validation for downloads
-
-4. **Input Validation:**
-   - Email format validation
-   - URL validation for sources
-   - SQL injection prevention via parameterized queries
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Backend Won't Start
-
-```bash
-# Check Python version
-python --version  # Should be 3.13+
-
-# Check virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# Reinstall dependencies
-pip install -r requirements.txt
-```
-
-### Database Connection Failed
-
-```bash
-# Check MySQL is running
-Get-Service MySQL80
-
-# Test connection
-mysql -u root -p
-
-# Verify config.yaml has correct password
-```
-
-### NewsAPI Returning 0 Articles
-
-- **Check API key** in config.yaml
-- **Verify quota:** Free tier = 100 requests/day
-- **Check category:** Use valid categories (technology, business, etc.)
-
-### Session Expired Error
-
-- **Cause:** Backend server restarted (sessions stored in memory)
-- **Solution:** Log out and log in again
-
-### Download Returns 401
-
-- **Cause:** Missing or invalid authentication token
-- **Solution:** Refresh page and log in again
+| Problem | Fix |
+|---|---|
+| Backend won't start | Activate the venv; `pip install -r backend/requirements.txt`; check MySQL is running |
+| Database connection failed | Verify password in `backend/config.yaml` or `DATABASE_PASSWORD`; `Get-Service MySQL80` |
+| NewsAPI returns 0 articles / quota errors | Free tier is 100 req/day — switch the engine to **Local AI** in the UI, or set `NEWS_PROVIDER=crawler` |
+| Crawler finds nothing | Your sources may not expose RSS; it falls back to curated category feeds automatically |
+| Ollama curation skipped | Ensure `ollama serve` is running and `ollama pull gemma4:e4b` is installed — the crawler logs why it skipped |
+| Session expired | Sessions live in memory by default and reset when the server restarts; log in again (or configure `REDIS_URL`) |
 
 ---
 
 ## 📝 License
 
-MIT License - Free for personal and commercial use.
+MIT License — free for personal and commercial use.
 
 ---
 
-## 👨‍💻 Developer Notes
-
-### Adding New Categories
-
-1. Add to `database_schema.sql`:
-
-```sql
-INSERT INTO categories (category_id, name, icon_name) 
-VALUES ('education', 'Education', 'academicCap');
-```
-
-1. Add icon to `Frontend/components/icons.tsx`
-
-2. Update category mapping in `api_server.py`
-
-### Adjusting Verification Threshold
-
-Edit `config.yaml`:
-
-```yaml
-nlp:
-  similarity_threshold: 0.6  # Lower = more lenient
-```
-
-### Changing Time Window
-
-```yaml
-time_window_hours: 24  # Fetch news from last 24 hours
-```
-
----
-
-## 🎓 Learning Resources
-
-- **Sentence-Transformers:** <https://www.sbert.net/>
-- **NewsAPI Documentation:** <https://newsapi.org/docs>
-- **Flask REST API:** <https://flask.palletsprojects.com/>
-- **React Hooks:** <https://react.dev/reference/react>
-
----
-
-**Built By Ahbab using Python, React, and Machine Learning**
+**Built by Ahbab using Python, React, and Machine Learning**

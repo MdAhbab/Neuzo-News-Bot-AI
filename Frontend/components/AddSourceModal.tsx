@@ -1,5 +1,6 @@
 import React, { useState, FormEvent } from 'react';
 import { XMarkIcon } from './icons';
+import * as NeuzoApi from '../services/neuzoApi';
 
 interface AddSourceModalProps {
   categoryId: string;
@@ -41,35 +42,19 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
     setLoading(true);
 
     try {
-      const token = localStorage.getItem('token');
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
-      const response = await fetch(
-        `${API_BASE_URL}/api/sources/${categoryId}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            source_url: sourceUrl,
-            source_name: sourceName || new URL(sourceUrl).hostname,
-            source_type: sourceType,
-            reliability_score: reliabilityScore / 100,
-          }),
-        }
+      await NeuzoApi.addSource(
+        categoryId,
+        sourceUrl,
+        sourceName || new URL(sourceUrl).hostname,
+        sourceType as 'web' | 'rss' | 'api',
+        reliabilityScore / 100
       );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to add source');
-      }
-
-      // Success
       onSourceAdded();
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to add source');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to add source';
+      setError(msg);
     } finally {
       setLoading(false);
     }
