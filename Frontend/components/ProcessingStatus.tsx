@@ -20,11 +20,18 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({ steps, curre
         <span className="font-semibold text-blue-400">{categoryName}</span> coverage.
       </p>
       
-      <div className="w-full bg-white/10 rounded-full h-2.5 mb-8">
+      <div
+        className="w-full bg-white/10 rounded-full h-2.5 mb-8"
+        role="progressbar"
+        aria-label="Report generation progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(progressPercentage)}
+      >
         <div className="bg-blue-500 h-2.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${progressPercentage}%` }}></div>
       </div>
 
-      <div className="space-y-4 text-left mb-8">
+      <div className="space-y-4 text-left mb-8" aria-live="polite">
         {steps.map((step, index) => {
           const isCompleted = index < currentStepIndex;
           const isCurrent = index === currentStepIndex;

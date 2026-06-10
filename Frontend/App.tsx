@@ -440,7 +440,7 @@ function App() {
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-400">
                   Auto uses NewsAPI and falls back to the on-device crawler.
                 </p>
               </div>
