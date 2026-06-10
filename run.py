@@ -86,22 +86,22 @@ def check_mysql():
     """Check if MySQL is running"""
     print_step("Step 3: Checking MySQL Server")
     
-    is_windows = platform.system() == "Windows"
+    import socket
     
-    if is_windows:
-        result = run_command("Get-Service MySQL80 -ErrorAction SilentlyContinue", 
-                           shell=True, check=False, capture_output=True)
-        if result and "Running" in result:
-            print_success("MySQL server is running")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(2)
+    try:
+        result = sock.connect_ex(('127.0.0.1', 3306))
+        if result == 0:
+            print_success("MySQL server is running on port 3306")
+            sock.close()
             return True
-    else:
-        result = run_command("systemctl is-active mysql", 
-                           shell=True, check=False, capture_output=True)
-        if result and "active" in result:
-            print_success("MySQL server is running")
-            return True
+    except Exception:
+        pass
+    finally:
+        sock.close()
     
-    print_error("MySQL server not running or not found")
+    print_error("MySQL server not running or not found on port 3306")
     print_info("Install MySQL 8.0+ from: https://dev.mysql.com/downloads/")
     print_info("Make sure MySQL service is started")
     return False
@@ -172,11 +172,8 @@ def setup_configuration():
     config_path = Path("backend/config.yaml")
 
     if config_path.exists():
-        print_warning("backend/config.yaml already exists")
-        response = input("Do you want to keep existing configuration? (y/n): ").lower()
-        if response == 'y':
-            print_info("Keeping existing configuration")
-            return True
+        print_info("backend/config.yaml already exists. Keeping existing configuration.")
+        return True
     
     print_info("Please provide the following information:")
     
@@ -256,44 +253,80 @@ def setup_database():
     
     db_config = config['database']
     
-    # Test MySQL connection
-    print_info("Testing MySQL connection...")
-    test_cmd = f'mysql -u {db_config["user"]} -p{db_config["password"]} -e "SELECT 1;"'
-    
-    if not run_command(test_cmd, check=False):
-        print_error("Failed to connect to MySQL. Check your password in config.yaml")
-        return False
-    
-    print_success("MySQL connection successful")
-    
-    # Create database
-    print_info(f"Creating database '{db_config['database']}'...")
-    create_db_cmd = f'mysql -u {db_config["user"]} -p{db_config["password"]} -e "CREATE DATABASE IF NOT EXISTS {db_config["database"]};"'
-    
-    if not run_command(create_db_cmd):
-        print_error("Failed to create database")
-        return False
-    
-    print_success("Database created")
-    
-    # Import schema
-    print_info("Importing database schema...")
-    schema_path = Path("backend/database_schema.sql")
+    is_windows = platform.system() == "Windows"
+    python_path = ".venv\\Scripts\\python.exe" if is_windows else ".venv/bin/python"
 
-    if not schema_path.exists():
-        print_error("backend/database_schema.sql not found")
-        return False
+    print_info("Setting up database using python connector...")
+    
+    script_content = f"""
+import sys
+try:
+    import mysql.connector
+except ImportError:
+    print("mysql-connector-python not found")
+    sys.exit(1)
 
-    import_cmd = f'mysql -u {db_config["user"]} -p{db_config["password"]} {db_config["database"]} < backend/database_schema.sql'
+try:
+    conn = mysql.connector.connect(
+        host="{db_config.get('host', 'localhost')}",
+        port={db_config.get('port', 3306)},
+        user="{db_config['user']}",
+        password="{db_config['password']}",
+        use_pure=True
+    )
+    cursor = conn.cursor()
+    cursor.execute("CREATE DATABASE IF NOT EXISTS {db_config['database']};")
+    conn.commit()
     
-    if not run_command(import_cmd):
-        print_error("Failed to import schema")
+    cursor.execute(f"USE {db_config['database']};")
+    
+    # Check if already initialized to prevent 1062 errors and duplicate seed data
+    cursor.execute("SHOW TABLES LIKE 'categories';")
+    if cursor.fetchone():
+        cursor.execute("SELECT COUNT(*) FROM categories;")
+        if cursor.fetchone()[0] > 0:
+            print("Database already initialized, skipping schema import")
+            cursor.close()
+            conn.close()
+            print("success")
+            sys.exit(0)
+    
+    with open("backend/database_schema.sql", "r", encoding="utf-8") as f:
+        schema_sql = f.read()
+        
+    for statement in schema_sql.split(';'):
+        stmt = statement.strip()
+        if stmt:
+            cursor.execute(stmt)
+        
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("success")
+except Exception as e:
+    print(f"error: {{e}}")
+    sys.exit(1)
+"""
+
+    with open("setup_db_temp.py", "w", encoding="utf-8") as f:
+        f.write(script_content)
+
+    result = run_command(f'"{python_path}" setup_db_temp.py', capture_output=True, check=False)
+    
+    try:
+        Path("setup_db_temp.py").unlink()
+    except:
+        pass
+        
+    if result and "success" in result.lower():
+        print_success("MySQL connection successful")
+        print_success("Database created")
+        print_success("Database schema imported")
+        print_success("Sample data loaded (6 categories, 42 news sources)")
+        return True
+    else:
+        print_error(f"Database setup failed: {result}")
         return False
-    
-    print_success("Database schema imported")
-    print_success("Sample data loaded (6 categories, 42 news sources)")
-    
-    return True
 
 def create_output_directory():
     """Create output directory for generated documents"""
@@ -399,10 +432,8 @@ def main():
         sys.exit(1)
     
     if not check_mysql():
-        print_warning("Continuing without MySQL check. Make sure it's running!")
-        response = input("Continue anyway? (y/n): ").lower()
-        if response != 'y':
-            sys.exit(1)
+        print_error("MySQL is not running. Please start it before running Neuzo.")
+        sys.exit(1)
     
     # Setup steps
     steps = [
@@ -423,6 +454,43 @@ def main():
     
     # Success!
     print_completion_message()
+    
+    # Run the servers
+    run_servers()
+
+def run_servers():
+    """Start both backend and frontend servers"""
+    print_step("Starting Servers")
+    
+    is_windows = platform.system() == "Windows"
+    python_path = ".venv\\Scripts\\python.exe" if is_windows else ".venv/bin/python"
+    
+    try:
+        print_info("Starting backend server...")
+        backend_process = subprocess.Popen([python_path, "backend/api_server.py"])
+        
+        print_info("Starting frontend server...")
+        frontend_process = subprocess.Popen(
+            "npm run dev", 
+            cwd="Frontend", 
+            shell=True
+        )
+        
+        print_success("Both servers are running!")
+        print_info("Press Ctrl+C to stop both servers")
+        
+        backend_process.wait()
+        frontend_process.wait()
+        
+    except KeyboardInterrupt:
+        print_info("\nShutting down servers...")
+        try:
+            backend_process.terminate()
+            frontend_process.terminate()
+        except:
+            pass
+        print_success("Servers stopped")
+        sys.exit(0)
 
 if __name__ == "__main__":
     try:

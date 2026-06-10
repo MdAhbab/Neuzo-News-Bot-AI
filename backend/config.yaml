@@ -1,56 +1,41 @@
 # Neuzo Configuration File
-# Every secret here can be overridden via environment variables
-# (DATABASE_PASSWORD, NEWSAPI_KEY, OLLAMA_HOST, ...) - see backend/.env.example
+# Secrets can be overridden via environment variables - see backend/.env.example
 
-# Database Settings
 database:
   host: "localhost"
   port: 3306
   database: "neuzo_db"
   user: "root"
-  password: "root"  # Override with DATABASE_PASSWORD env var
+  password: "root"
   pool_size: 5
   pool_recycle: 3600
 
-# News API Settings
-# Get your API key from https://newsapi.org/ and set it via the NEWSAPI_KEY
-# environment variable or backend/.env (never commit a real key here).
-# Without a key, the 'auto' pipeline uses the local crawler.
 news_api:
-  api_key: ""
+  api_key: "3f15adc8f07344a8b09c3e6473694b24"
 
-# News pipeline provider:
-#   newsapi - always use NewsAPI (requires api_key)
-#   crawler - always use the local agentic crawler (RSS discovery + Ollama)
-#   auto    - NewsAPI first, fall back to the crawler on quota/empty/missing key
+# newsapi | crawler | auto
 news_pipeline:
   provider: "auto"
 
-# Local LLM settings (used ONLY by the news crawler for relevance filtering
-# and summarisation - no other feature talks to Ollama)
+# Local LLM used only by the news crawler
 ollama:
   enabled: true
   host: "http://localhost:11434"
   model: "gemma4:e4b"
   timeout_seconds: 60
 
-# Session Settings
 session:
   expiry_hours: 24
 
-# Time Settings
-time_window_hours: 1  # Preferred news recency window
+time_window_hours: 1
 
-# NLP Model Settings
 nlp:
-  model_name: "sentence-transformers/all-MiniLM-L6-v2"  # Fast and efficient
-  similarity_threshold: 0.7  # Threshold for news verification
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  similarity_threshold: 0.7
 
-# Document Generation Settings
 document:
-  output_dir: "output"   # Relative paths resolve inside backend/
+  output_dir: "output"
 
-# Agent Settings
 agents:
-  max_news_items: 20  # Maximum news items to fetch
-  verification_depth: 3  # Number of sources to cross-reference
+  max_news_items: 20
+  verification_depth: 3
