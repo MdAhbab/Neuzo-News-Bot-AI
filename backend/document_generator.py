@@ -8,20 +8,25 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 from typing import List
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentGenerator:
     """Generates Word documents with news reports"""
     
-    def __init__(self, output_dir: str = "output"):
+    def __init__(self, output_dir: str = "output", verification_threshold: float = 0.7):
         """
         Initialize the document generator
-        
+
         Args:
             output_dir: Directory to save generated documents
+            verification_threshold: Threshold used by the verifier (for reporting)
         """
         self.output_dir = output_dir
+        self.verification_threshold = verification_threshold
         os.makedirs(output_dir, exist_ok=True)
     
     def generate_report(self, category: str, verification_results: List,
@@ -37,7 +42,7 @@ class DocumentGenerator:
         Returns:
             Path to the generated document
         """
-        print(f"📄 Generating Word document...")
+        logger.info("Generating Word document...")
         
         # Create document
         doc = Document()
@@ -82,7 +87,7 @@ class DocumentGenerator:
         filepath = os.path.join(self.output_dir, filename)
         doc.save(filepath)
         
-        print(f"✅ Document saved: {filepath}")
+        logger.info(f"Document saved: {filepath}")
         return filepath
     
     def _setup_document_styles(self, doc: Document):
@@ -194,8 +199,8 @@ class DocumentGenerator:
             )
     
     def _get_threshold(self) -> float:
-        """Get verification threshold (default 0.7)"""
-        return 0.7
+        """Get the verification threshold used for this report"""
+        return self.verification_threshold
     
     def _add_article(self, doc: Document, result, index: int, verified: bool = True):
         """Add a single article to the document"""

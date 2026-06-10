@@ -33,8 +33,8 @@ secrets.yaml
 !.env.example
 
 # Output files
-output/*.docx
-output/*.pdf
+output/
+backend/output/
 *.log
 
 # Database

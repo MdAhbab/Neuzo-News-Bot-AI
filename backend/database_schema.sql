@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     sources_used TEXT,
     agent_actions TEXT,
     error_message TEXT,
+    articles_count INT DEFAULT NULL,
+    verified_count INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

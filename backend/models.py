@@ -1,5 +1,4 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
 import secrets
 import hashlib
 import logging
@@ -61,7 +60,7 @@ class User:
                         salt, pwd_hash = stored_hash.split('$')
                         check_hash = hashlib.sha256((password + salt).encode()).hexdigest()
                         return check_hash == pwd_hash
-                    except:
+                    except ValueError:
                         pass
                 return False
         else:
@@ -69,7 +68,7 @@ class User:
                 salt, pwd_hash = stored_hash.split('$')
                 check_hash = hashlib.sha256((password + salt).encode()).hexdigest()
                 return check_hash == pwd_hash
-            except:
+            except ValueError:
                 return False
     
     @staticmethod
@@ -262,26 +261,37 @@ class Job:
     @staticmethod
     def update_status(job_id: str, status: str, current_step: Optional[str] = None,
                      error_message: Optional[str] = None):
-        """Update job status"""
+        """Update job status (error_message is preserved unless explicitly set)"""
         db = get_db()
-        query = """
-            UPDATE jobs 
-            SET status = %s, current_step = %s, error_message = %s
-            WHERE job_id = %s
-        """
-        db.execute_update(query, (status, current_step, error_message, job_id))
-    
+        if error_message is not None:
+            query = """
+                UPDATE jobs
+                SET status = %s, current_step = %s, error_message = %s
+                WHERE job_id = %s
+            """
+            db.execute_update(query, (status, current_step, error_message, job_id))
+        else:
+            query = """
+                UPDATE jobs
+                SET status = %s, current_step = %s
+                WHERE job_id = %s
+            """
+            db.execute_update(query, (status, current_step, job_id))
+
     @staticmethod
-    def complete(job_id: str, report_path: str, report_name: str, agent_actions: List[str]):
+    def complete(job_id: str, report_path: str, report_name: str, agent_actions: List[str],
+                 articles_count: Optional[int] = None, verified_count: Optional[int] = None):
         """Mark job as complete"""
         db = get_db()
         query = """
             UPDATE jobs
             SET status = 'Complete', report_path = %s, report_name = %s,
-                agent_actions = %s, completed_at = NOW()
+                agent_actions = %s, articles_count = %s, verified_count = %s,
+                completed_at = NOW()
             WHERE job_id = %s
         """
-        db.execute_update(query, (report_path, report_name, ','.join(agent_actions), job_id))
+        db.execute_update(query, (report_path, report_name, ','.join(agent_actions),
+                                  articles_count, verified_count, job_id))
         logger.info(f"Job completed: {job_id}")
     
     @staticmethod

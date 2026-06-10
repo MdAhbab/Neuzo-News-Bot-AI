@@ -8,7 +8,6 @@ import subprocess
 import sys
 import os
 import platform
-import shutil
 from pathlib import Path
 
 class Colors:
@@ -137,7 +136,7 @@ def install_python_dependencies():
         return False
     
     print_info("Installing dependencies (this may take 2-3 minutes)...")
-    if run_command(f'"{pip_path}" install -r requirements.txt'):
+    if run_command(f'"{pip_path}" install -r backend/requirements.txt'):
         print_success("Python dependencies installed")
         return True
     else:
@@ -170,10 +169,10 @@ def setup_configuration():
     """Setup configuration file"""
     print_step("Step 7: Configuring Application")
     
-    config_path = Path("config.yaml")
-    
+    config_path = Path("backend/config.yaml")
+
     if config_path.exists():
-        print_warning("config.yaml already exists")
+        print_warning("backend/config.yaml already exists")
         response = input("Do you want to keep existing configuration? (y/n): ").lower()
         if response == 'y':
             print_info("Keeping existing configuration")
@@ -191,11 +190,13 @@ def setup_configuration():
     newsapi_key = input("NewsAPI key: ").strip()
     
     if not newsapi_key:
-        print_warning("No NewsAPI key provided. You'll need to add it later in config.yaml")
+        print_warning("No NewsAPI key provided. The local crawler will be used "
+                      "unless you add a key later in backend/config.yaml")
         newsapi_key = "YOUR_NEWSAPI_KEY_HERE"
-    
-    # Create config.yaml
+
+    # Create backend/config.yaml
     config_content = f"""# Neuzo Configuration File
+# Secrets can be overridden via environment variables - see backend/.env.example
 
 database:
   host: "localhost"
@@ -209,24 +210,37 @@ database:
 news_api:
   api_key: "{newsapi_key}"
 
+# newsapi | crawler | auto
+news_pipeline:
+  provider: "auto"
+
+# Local LLM used only by the news crawler
+ollama:
+  enabled: true
+  host: "http://localhost:11434"
+  model: "gemma4:e4b"
+  timeout_seconds: 60
+
+session:
+  expiry_hours: 24
+
+time_window_hours: 1
+
 nlp:
   model_name: "sentence-transformers/all-MiniLM-L6-v2"
   similarity_threshold: 0.7
-  device: "cpu"
-
-agent:
-  max_news_items: 20
-  time_window_hours: 24
-  verification_threshold: 0.7
 
 document:
   output_dir: "output"
-  template_style: "professional"
+
+agents:
+  max_news_items: 20
+  verification_depth: 3
 """
-    
-    with open("config.yaml", "w") as f:
+
+    with open(config_path, "w") as f:
         f.write(config_content)
-    
+
     print_success("Configuration file created")
     return True
 
@@ -235,9 +249,9 @@ def setup_database():
     print_step("Step 8: Setting Up Database")
     
     import yaml
-    
+
     # Load config
-    with open("config.yaml", "r") as f:
+    with open("backend/config.yaml", "r") as f:
         config = yaml.safe_load(f)
     
     db_config = config['database']
@@ -264,13 +278,13 @@ def setup_database():
     
     # Import schema
     print_info("Importing database schema...")
-    schema_path = Path("database_schema.sql")
-    
+    schema_path = Path("backend/database_schema.sql")
+
     if not schema_path.exists():
-        print_error("database_schema.sql not found")
+        print_error("backend/database_schema.sql not found")
         return False
-    
-    import_cmd = f'mysql -u {db_config["user"]} -p{db_config["password"]} {db_config["database"]} < database_schema.sql'
+
+    import_cmd = f'mysql -u {db_config["user"]} -p{db_config["password"]} {db_config["database"]} < backend/database_schema.sql'
     
     if not run_command(import_cmd):
         print_error("Failed to import schema")
@@ -284,11 +298,34 @@ def setup_database():
 def create_output_directory():
     """Create output directory for generated documents"""
     print_step("Step 9: Creating Output Directory")
-    
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
-    
+
+    output_dir = Path("backend/output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     print_success("Output directory ready")
+    return True
+
+def create_test_user():
+    """Create the documented test account (test@neuzo.com / test123)"""
+    print_step("Step 10: Creating Test User")
+
+    is_windows = platform.system() == "Windows"
+    python_path = ".venv\\Scripts\\python.exe" if is_windows else ".venv/bin/python"
+
+    snippet = (
+        "import sys; sys.path.insert(0, 'backend'); "
+        "from models import User; "
+        "uid = User.create('test@neuzo.com', 'test123', 'Test User'); "
+        "print('created' if uid else 'exists')"
+    )
+
+    result = run_command(f'"{python_path}" -c "{snippet}"', check=False, capture_output=True)
+    if result == 'created':
+        print_success("Test user created (test@neuzo.com / test123)")
+    elif result == 'exists':
+        print_warning("Test user already exists, skipping")
+    else:
+        print_warning("Could not create test user automatically - sign up via the UI instead")
     return True
 
 def print_completion_message():
@@ -308,7 +345,7 @@ def print_completion_message():
    {activate_cmd}
    
    {Colors.OKCYAN}# Run Flask server{Colors.ENDC}
-   python api_server.py
+   python backend/api_server.py
 
 2. Start the Frontend (in a new terminal):
    {Colors.OKCYAN}cd Frontend{Colors.ENDC}
@@ -322,18 +359,18 @@ def print_completion_message():
    {Colors.OKCYAN}Password: test123{Colors.ENDC}
 
 {Colors.BOLD}Configuration:{Colors.ENDC}
-- Edit {Colors.OKCYAN}config.yaml{Colors.ENDC} to change settings
-- Add your NewsAPI key if not already added
+- Edit {Colors.OKCYAN}backend/config.yaml{Colors.ENDC} to change settings
+- Add your NewsAPI key, or rely on the local crawler (Ollama + gemma4:e4b)
 - Database credentials are already configured
 
 {Colors.BOLD}Documentation:{Colors.ENDC}
 - Full documentation: {Colors.OKCYAN}README.md{Colors.ENDC}
-- Database schema: {Colors.OKCYAN}database_schema.sql{Colors.ENDC}
+- Database schema: {Colors.OKCYAN}backend/database_schema.sql{Colors.ENDC}
 
 {Colors.WARNING}Important Notes:{Colors.ENDC}
 - Make sure both backend (5000) and frontend (3000) servers are running
-- NewsAPI free tier: 100 requests/day
-- Reports are saved in the {Colors.OKCYAN}output/{Colors.ENDC} directory
+- NewsAPI free tier: 100 requests/day (the crawler has no quota)
+- Reports are saved in the {Colors.OKCYAN}backend/output/{Colors.ENDC} directory
 
 {Colors.OKGREEN}Happy news hunting with Neuzo! 🚀{Colors.ENDC}
 """)
@@ -371,7 +408,8 @@ def main():
         install_frontend_dependencies,
         setup_configuration,
         setup_database,
-        create_output_directory
+        create_output_directory,
+        create_test_user
     ]
     
     for step in steps:
