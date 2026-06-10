@@ -43,7 +43,7 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({ steps, curre
                 )}
               </div>
               <span className={`transition-colors duration-300 ${
-                isCompleted ? 'text-gray-400 line-through' :
+                isCompleted ? 'text-gray-400' :
                 isCurrent ? 'text-white font-semibold' :
                 'text-gray-500'
               }`}>

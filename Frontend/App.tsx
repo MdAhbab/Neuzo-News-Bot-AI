@@ -40,6 +40,8 @@ function App() {
   const [addCategoryLoading, setAddCategoryLoading] = useState(false);
 
   const [selectedEngine, setSelectedEngine] = useState<NewsEngine>('auto');
+  const [startingJob, setStartingJob] = useState(false);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
 
   // Polling failure counter ref (reset on success, tolerate up to 3 failures)
   const pollFailureCount = useRef(0);
@@ -58,6 +60,7 @@ function App() {
   );
 
   const loadCategories = useCallback(async (): Promise<Category[]> => {
+    setCategoriesLoading(true);
     try {
       const apiCats = await NeuzoApi.getCategories();
       const mapped = mapApiCategories(apiCats);
@@ -66,6 +69,8 @@ function App() {
     } catch {
       setCategories(CATEGORIES);
       return CATEGORIES;
+    } finally {
+      setCategoriesLoading(false);
     }
   }, [mapApiCategories]);
 
@@ -137,19 +142,22 @@ function App() {
   };
 
   const handleGenerateReport = async () => {
-    if (!selectedCategory || sources.length === 0) return;
-    setAppState(AppState.PROCESSING);
+    if (!selectedCategory || sources.length === 0 || startingJob) return;
+    setStartingJob(true);
 
     try {
       const initialJob = await NeuzoApi.startJob(selectedCategory, sources, selectedEngine);
       setJob(initialJob);
       setCurrentStep(PROCESSING_STEPS(getCategoryName(selectedCategory))[0]);
+      setAppState(AppState.PROCESSING);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Failed to start job';
       if (!msg.includes('Session expired')) {
         setErrorMessage(msg);
         setAppState(AppState.ERROR);
       }
+    } finally {
+      setStartingJob(false);
     }
   };
 
@@ -270,6 +278,10 @@ function App() {
                 <button type="button" onClick={handleReset} className="btn btn-secondary px-6 py-2">
                   Dismiss
                 </button>
+                <p className="mt-2 text-xs text-gray-400">
+                  The report keeps generating in the background — you can find it later under
+                  History.
+                </p>
               </div>
             </div>
           );
@@ -311,6 +323,13 @@ function App() {
                 Pick a category and the sources to draw from. Neuzo fetches, cross-verifies, and
                 synthesises the latest coverage into a downloadable report.
               </p>
+              {categoriesLoading ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 my-10" aria-hidden="true">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="card h-36 animate-pulse" />
+                  ))}
+                </div>
+              ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 my-10">
                 {categories.map((cat) => (
                   <CategoryCard
@@ -338,6 +357,7 @@ function App() {
                   </span>
                 </div>
               </div>
+              )}
 
               <div className="card p-6 my-8 text-left">
                 <div className="flex items-center justify-between mb-4">
@@ -428,11 +448,15 @@ function App() {
               <button
                 type="button"
                 onClick={handleGenerateReport}
-                disabled={!selectedCategory || sources.length === 0}
+                disabled={!selectedCategory || sources.length === 0 || startingJob}
                 className="btn btn-primary w-full md:w-auto px-12 py-4 text-lg shadow-lg"
               >
-                <BotIcon className="h-6 w-6" />
-                Generate Report
+                {startingJob ? (
+                  <SpinnerIcon className="h-6 w-6" />
+                ) : (
+                  <BotIcon className="h-6 w-6" />
+                )}
+                {startingJob ? 'Starting…' : 'Generate Report'}
               </button>
             </div>
           );

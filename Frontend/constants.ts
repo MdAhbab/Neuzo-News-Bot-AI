@@ -54,9 +54,11 @@ export const CATEGORIES: Category[] = [
 
 export const defaultNewCategoryIcon = NewspaperIcon;
 
+// Must match PROCESSING_STEPS in backend/api_server.py exactly — the
+// processing screen matches the polled step string against this list.
 export const PROCESSING_STEPS = (categoryName: string) => [
   `Initiating agent for ${categoryName}...`,
-  'Querying news pool (Last 60 minutes)...',
+  'Querying news pool...',
   'Receiving and parsing articles...',
   'Verifying news against references...',
   'Detecting duplicate and related stories...',
