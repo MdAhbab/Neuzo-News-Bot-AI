@@ -377,6 +377,9 @@ def print_completion_message():
 
 def main():
     """Main setup function"""
+    # Anchor all relative paths to the repository root
+    os.chdir(Path(__file__).resolve().parent)
+
     print(f"""
 {Colors.HEADER}{Colors.BOLD}
 ╔═══════════════════════════════════════════════════════════╗

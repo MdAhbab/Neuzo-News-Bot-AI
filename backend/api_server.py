@@ -30,10 +30,13 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend
 
-# Configuration from environment
+# Configuration: environment first, then config.yaml, then defaults
+_session_cfg = load_config().get('session', {})
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
-app.config['SESSION_EXPIRY_HOURS'] = int(os.getenv('SESSION_EXPIRY_HOURS', '24'))
+app.config['SESSION_EXPIRY_HOURS'] = int(
+    os.getenv('SESSION_EXPIRY_HOURS', _session_cfg.get('expiry_hours', 24))
+)
 
 # Rate limiting setup
 try:
@@ -135,9 +138,9 @@ def cleanup_expired_sessions():
     if redis_client:
         return
     now = datetime.now()
-    if now - _last_session_cleanup < timedelta(minutes=15):
-        return
     with _session_lock:
+        if now - _last_session_cleanup < timedelta(minutes=15):
+            return
         _last_session_cleanup = now
         expired = [t for t, s in active_sessions.items() if s['expires'] < now]
         for token in expired:
@@ -279,8 +282,12 @@ def process_job_background(job_id: str, category_name: str, sources: list,
         report_name = os.path.basename(report_path)
 
         # Mark job as complete
-        agent_actions = [step.format(category=category_name) for step in PROCESSING_STEPS]
-        agent_actions[1] = f"Queried news pool via {provider_used}..."
+        agent_actions = [
+            step.format(category=category_name).replace(
+                'Querying news pool...', f'Queried news pool via {provider_used}...'
+            )
+            for step in PROCESSING_STEPS
+        ]
         Job.complete(job_id, report_path, report_name, agent_actions,
                      articles_count=len(articles), verified_count=verified_count)
         logger.info(f"Job {job_id} completed - {len(verification_results)} articles processed")
@@ -428,10 +435,10 @@ def get_categories():
     """Get all categories with their default sources"""
     try:
         categories = Category.get_all()
+        sources_by_category = NewsSource.get_urls_grouped_by_category()
 
         for cat in categories:
-            sources = NewsSource.get_by_category(cat['category_id'])
-            cat['defaultSources'] = [s['source_url'] for s in sources]
+            cat['defaultSources'] = sources_by_category.get(cat['category_id'], [])
 
         return jsonify(categories), 200
 
@@ -591,10 +598,10 @@ def get_job_status(job_id: str):
         }
 
         if job['status'] == 'Complete':
-            response['reportUrl'] = f"/jobs/{job_id}/download"
+            response['reportUrl'] = f"/api/jobs/{job_id}/download"
             response['reportName'] = job['report_name']
-            response['usedSources'] = job['sources_used'].split(',') if job['sources_used'] else []
-            response['agentActions'] = job['agent_actions'].split(',') if job['agent_actions'] else []
+            response['usedSources'] = Job.decode_list(job['sources_used'])
+            response['agentActions'] = Job.decode_list(job['agent_actions'])
             response['articlesCount'] = job.get('articles_count')
             response['verifiedCount'] = job.get('verified_count')
         elif job['status'] == 'Error':

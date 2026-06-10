@@ -131,11 +131,12 @@ class LocalNewsCrawler:
             for path in COMMON_FEED_PATHS:
                 candidate = base + path
                 try:
-                    head = requests.get(candidate, headers=REQUEST_HEADERS, timeout=5, stream=True)
-                    content_type = head.headers.get("Content-Type", "")
-                    if head.ok and ("xml" in content_type or "rss" in content_type):
-                        feeds.append(candidate)
-                        break
+                    with requests.get(candidate, headers=REQUEST_HEADERS,
+                                      timeout=5, stream=True) as head:
+                        content_type = head.headers.get("Content-Type", "")
+                        if head.ok and ("xml" in content_type or "rss" in content_type):
+                            feeds.append(candidate)
+                            break
                 except requests.RequestException:
                     continue
 
@@ -174,18 +175,11 @@ class LocalNewsCrawler:
             feed_urls = RSS_FEEDS.get(key, RSS_FEEDS["general"])
             logger.info("Using curated fallback feeds for category %s", category)
 
-        articles: List[NewsArticle] = []
-        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            futures = [pool.submit(parse_rss_feed, url, from_time, 15) for url in feed_urls]
-            for future in as_completed(futures):
-                articles.extend(future.result())
+        articles = self._fetch_feeds(feed_urls, from_time, max_entries=15)
 
         # Relax the time window if it filtered everything out
         if not articles:
-            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-                futures = [pool.submit(parse_rss_feed, url, None, 10) for url in feed_urls]
-                for future in as_completed(futures):
-                    articles.extend(future.result())
+            articles = self._fetch_feeds(feed_urls, from_time=None, max_entries=10)
 
         articles = self._dedupe(articles)
         articles.sort(key=lambda a: a.published_at or datetime.min, reverse=True)
@@ -196,6 +190,17 @@ class LocalNewsCrawler:
 
         articles = articles[: self.max_items]
         logger.info("Crawler returning %d articles for %s", len(articles), category)
+        return articles
+
+    def _fetch_feeds(self, feed_urls: List[str], from_time: Optional[datetime],
+                     max_entries: int) -> List[NewsArticle]:
+        """Fetch and parse a set of feeds concurrently"""
+        articles: List[NewsArticle] = []
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            futures = [pool.submit(parse_rss_feed, url, from_time, max_entries)
+                       for url in feed_urls]
+            for future in as_completed(futures):
+                articles.extend(future.result())
         return articles
 
     @staticmethod

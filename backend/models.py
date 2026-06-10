@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict, Any
+import json
 import secrets
 import hashlib
 import logging
@@ -224,6 +225,22 @@ class NewsSource:
             return None
     
     @staticmethod
+    def get_urls_grouped_by_category() -> Dict[str, List[str]]:
+        """Get all active source URLs grouped by category_id (single query)"""
+        db = get_db()
+        query = """
+            SELECT c.category_id, ns.source_url
+            FROM news_sources ns
+            JOIN categories c ON ns.category_id = c.id
+            WHERE ns.is_active = TRUE AND c.is_active = TRUE
+            ORDER BY ns.reliability_score DESC, ns.source_name ASC
+        """
+        grouped: Dict[str, List[str]] = {}
+        for row in db.execute_query(query):
+            grouped.setdefault(row['category_id'], []).append(row['source_url'])
+        return grouped
+
+    @staticmethod
     def update_last_checked(source_id: int):
         """Update last checked timestamp for a source"""
         db = get_db()
@@ -233,7 +250,23 @@ class NewsSource:
 
 class Job:
     """Job/Report model"""
-    
+
+    @staticmethod
+    def decode_list(value: Optional[str]) -> List[str]:
+        """
+        Decode a stored list column. New rows are JSON arrays; rows written
+        by older versions were comma-joined strings.
+        """
+        if not value:
+            return []
+        try:
+            decoded = json.loads(value)
+            if isinstance(decoded, list):
+                return [str(item) for item in decoded]
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return value.split(',')
+
     @staticmethod
     def create(job_id: str, user_id: int, category_id: str, sources_used: List[str]) -> Optional[int]:
         """Create a new job"""
@@ -250,7 +283,7 @@ class Job:
             """
             j_id = db.execute_update(
                 query,
-                (job_id, user_id, category['id'], ','.join(sources_used))
+                (job_id, user_id, category['id'], json.dumps(sources_used))
             )
             logger.info(f"Job created: {job_id}")
             return j_id
@@ -290,7 +323,7 @@ class Job:
                 completed_at = NOW()
             WHERE job_id = %s
         """
-        db.execute_update(query, (report_path, report_name, ','.join(agent_actions),
+        db.execute_update(query, (report_path, report_name, json.dumps(agent_actions),
                                   articles_count, verified_count, job_id))
         logger.info(f"Job completed: {job_id}")
     

@@ -161,9 +161,8 @@ export const downloadReportFile = async (
   jobId: string,
   fallbackName?: string
 ): Promise<void> => {
-  const token = localStorage.getItem('neuzo_auth_token');
   const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
   });
 
   if (!response.ok) {

@@ -5,7 +5,7 @@ import { ClockIcon, DocumentTextIcon, CheckCircleIcon, XCircleIcon, ArrowPathIco
 
 interface JobHistoryProps {
     onBack: () => void;
-    onDownload: (jobId: string) => void;
+    onDownload: (jobId: string, reportName?: string) => void;
 }
 
 export const JobHistory: React.FC<JobHistoryProps> = ({ onBack, onDownload }) => {
@@ -143,7 +143,7 @@ export const JobHistory: React.FC<JobHistoryProps> = ({ onBack, onDownload }) =>
 
                                     {job.status === 'Complete' && job.report_name && (
                                         <button
-                                            onClick={() => onDownload(job.job_id)}
+                                            onClick={() => onDownload(job.job_id, job.report_name)}
                                             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                                         >
                                             <DocumentTextIcon className="h-4 w-4" />

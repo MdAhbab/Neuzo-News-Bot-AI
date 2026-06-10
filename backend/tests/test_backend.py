@@ -99,6 +99,28 @@ class TestNewsVerifier:
         assert len(result.similar_sources) == 1
 
 
+class TestJobModel:
+    """Tests for Job list-column serialisation"""
+
+    def test_decode_list_json(self):
+        from models import Job
+
+        assert Job.decode_list('["https://a.com/?x=1,2", "step two"]') == [
+            'https://a.com/?x=1,2', 'step two']
+
+    def test_decode_list_legacy_csv(self):
+        from models import Job
+
+        assert Job.decode_list('https://a.com,https://b.com') == [
+            'https://a.com', 'https://b.com']
+
+    def test_decode_list_empty(self):
+        from models import Job
+
+        assert Job.decode_list(None) == []
+        assert Job.decode_list('') == []
+
+
 class TestNewsCrawler:
     """Tests for the local agentic news crawler (no network required)"""
 

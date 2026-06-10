@@ -152,14 +152,18 @@ function App() {
     }
   };
 
-  const handleReset = () => {
-    setAppState(AppState.SELECTION);
+  const resetWorkspace = () => {
     setSelectedCategory(null);
     setJob(null);
     setCurrentStep('');
     setErrorMessage(null);
     setSources([]);
     pollFailureCount.current = 0;
+  };
+
+  const handleReset = () => {
+    resetWorkspace();
+    setAppState(AppState.SELECTION);
   };
 
   const handleAuthSuccess = (u: User) => {
@@ -175,15 +179,16 @@ function App() {
       // Clear local state regardless
       NeuzoApi.clearAuthToken();
     }
+    resetWorkspace();
     setUser(null);
     setCategories(CATEGORIES);
-    setSelectedCategory(null);
-    setJob(null);
-    setCurrentStep('');
-    setErrorMessage(null);
-    setSources([]);
-    pollFailureCount.current = 0;
     setAppState(AppState.AUTH);
+  };
+
+  const openAddCategoryModal = () => {
+    setAddCategoryError(null);
+    setNewCategoryName('');
+    setIsAddCategoryModalOpen(true);
   };
 
   const handleAddCategory = async (e: FormEvent) => {
@@ -287,7 +292,7 @@ function App() {
           return (
             <JobHistory
               onBack={() => setAppState(AppState.SELECTION)}
-              onDownload={(jobId) => NeuzoApi.downloadReportFile(jobId)}
+              onDownload={(jobId, reportName) => NeuzoApi.downloadReportFile(jobId, reportName)}
             />
           );
 
@@ -312,17 +317,11 @@ function App() {
                   />
                 ))}
                 <div
-                  onClick={() => {
-                    setAddCategoryError(null);
-                    setNewCategoryName('');
-                    setIsAddCategoryModalOpen(true);
-                  }}
+                  onClick={openAddCategoryModal}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setAddCategoryError(null);
-                      setNewCategoryName('');
-                      setIsAddCategoryModalOpen(true);
+                      openAddCategoryModal();
                     }
                   }}
                   className="flex flex-col items-center justify-center p-6 bg-white/5 backdrop-blur-md rounded-xl cursor-pointer transition-all duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-2xl hover:bg-white/10 border-2 border-dashed border-white/20"
