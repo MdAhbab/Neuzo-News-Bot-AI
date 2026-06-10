@@ -10,6 +10,7 @@ import { ReportView } from './components/ReportView';
 import { AddSourceModal } from './components/AddSourceModal';
 import { JobHistory } from './components/JobHistory';
 import { AuthScreen } from './components/AuthScreen';
+import { Modal } from './components/Modal';
 import {
   BotIcon,
   XCircleIcon,
@@ -266,18 +267,21 @@ function App() {
                 partialReportContent={job?.partialReportContent}
               />
               <div className="mt-8 text-center">
-                <button
-                  onClick={handleReset}
-                  className="px-6 py-2 bg-white/10 text-gray-200 font-semibold rounded-lg hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent focus:ring-white/50"
-                >
-                  Cancel
+                <button type="button" onClick={handleReset} className="btn btn-secondary px-6 py-2">
+                  Dismiss
                 </button>
               </div>
             </div>
           );
 
         case AppState.REPORT_VIEW:
-          return job ? <ReportView job={job} onReset={handleReset} /> : null;
+          return job ? (
+            <ReportView
+              job={job}
+              categoryName={getCategoryName(selectedCategory)}
+              onReset={handleReset}
+            />
+          ) : null;
 
         case AppState.ERROR:
           return (
@@ -300,12 +304,12 @@ function App() {
         default:
           return (
             <div className="w-full max-w-5xl text-center">
-              <h1 className="text-4xl md:text-5xl font-extrabold text-white">
-                Neuzo: Your Agentic News Bot
+              <h1 className="text-3xl md:text-4xl font-bold text-white">
+                Generate a verified news report
               </h1>
-              <p className="mt-4 text-lg text-gray-300 max-w-2xl mx-auto">
-                Select a category to begin. Neuzo will fetch, verify, and synthesise all news from
-                the past hour.
+              <p className="mt-3 text-base md:text-lg text-gray-300 max-w-2xl mx-auto">
+                Pick a category and the sources to draw from. Neuzo fetches, cross-verifies, and
+                synthesises the latest coverage into a downloadable report.
               </p>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 my-10">
                 {categories.map((cat) => (
@@ -335,16 +339,17 @@ function App() {
                 </div>
               </div>
 
-              <div className="bg-black/20 backdrop-blur-lg border border-white/10 p-6 rounded-xl my-8 shadow-lg text-left">
+              <div className="card p-6 my-8 text-left">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-bold text-white">News Pool Sources</h3>
+                  <h2 className="text-lg font-semibold text-white">News pool sources</h2>
                   {selectedCategory && (
                     <button
+                      type="button"
                       onClick={handleAddSourceToDatabase}
-                      className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                      className="btn btn-subtle px-3 py-1.5 text-sm"
                     >
                       <PlusCircleIcon className="h-4 w-4" />
-                      Add to Database
+                      Save a source
                     </button>
                   )}
                 </div>
@@ -356,14 +361,15 @@ function App() {
                         value={newSourceUrl}
                         onChange={(e) => setNewSourceUrl(e.target.value)}
                         placeholder="https://your-news-source.com"
-                        className="flex-grow p-2 border border-white/20 bg-white/5 rounded-md text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
+                        aria-label="Source URL"
+                        className="input flex-grow p-2"
                       />
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-500 disabled:bg-gray-600/50 transition-colors"
+                        className="btn btn-primary px-4 py-2"
                         disabled={!newSourceUrl}
                       >
-                        Add Source
+                        Add source
                       </button>
                     </form>
                     <div className="flex flex-wrap gap-2">
@@ -396,14 +402,15 @@ function App() {
 
               {/* News engine picker */}
               <div className="flex flex-col items-center gap-2 mb-6">
-                <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
+                <div className="flex flex-wrap items-center justify-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
                   <span className="text-sm text-gray-400 px-2">News engine:</span>
                   {engineOptions.map((opt) => (
                     <button
                       key={opt.value}
                       type="button"
                       onClick={() => setSelectedEngine(opt.value)}
-                      className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                      aria-pressed={selectedEngine === opt.value}
+                      className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                         selectedEngine === opt.value
                           ? 'bg-blue-600 text-white'
                           : 'text-gray-300 hover:bg-white/10'
@@ -419,9 +426,10 @@ function App() {
               </div>
 
               <button
+                type="button"
                 onClick={handleGenerateReport}
                 disabled={!selectedCategory || sources.length === 0}
-                className="w-full md:w-auto px-12 py-4 bg-blue-600 text-white font-bold text-lg rounded-lg shadow-lg hover:bg-blue-500 disabled:bg-gray-600/50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105 disabled:transform-none flex items-center justify-center gap-3"
+                className="btn btn-primary w-full md:w-auto px-12 py-4 text-lg shadow-lg"
               >
                 <BotIcon className="h-6 w-6" />
                 Generate Report
@@ -454,8 +462,9 @@ function App() {
           {user && (
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={() => setAppState(AppState.JOB_HISTORY)}
-                className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                className="btn btn-subtle px-3 py-1.5 text-sm font-medium"
                 aria-label="View report history"
               >
                 <ClockIcon className="h-4 w-4" />
@@ -463,8 +472,9 @@ function App() {
               </button>
               <span className="hidden sm:block text-sm text-gray-400">{user.email}</span>
               <button
+                type="button"
                 onClick={handleLogout}
-                className="px-3 py-1.5 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                className="btn btn-subtle px-3 py-1.5 text-sm font-medium"
               >
                 Log out
               </button>
@@ -478,45 +488,42 @@ function App() {
 
       {/* Add Category Modal */}
       {isAddCategoryModalOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in"
-          onClick={() => setIsAddCategoryModalOpen(false)}
+        <Modal
+          title="Add a category"
+          subtitle="Custom categories are saved to your account."
+          onClose={() => setIsAddCategoryModalOpen(false)}
         >
-          <div
-            className="bg-black/50 backdrop-blur-xl border border-white/10 p-8 rounded-2xl shadow-2xl w-full max-w-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-2xl font-bold text-white mb-4">Add New Category</h2>
-            {addCategoryError && (
-              <p className="mb-3 text-sm text-red-400">{addCategoryError}</p>
-            )}
-            <form onSubmit={handleAddCategory}>
-              <input
-                type="text"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="e.g., Artificial Intelligence"
-                className="w-full p-3 mb-4 border border-white/20 bg-white/5 rounded-md text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
-              />
-              <div className="flex justify-end gap-4">
-                <button
-                  type="button"
-                  onClick={() => setIsAddCategoryModalOpen(false)}
-                  className="px-6 py-2 bg-white/10 text-gray-200 font-semibold rounded-lg hover:bg-white/20"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-500 disabled:bg-gray-600/50"
-                  disabled={!newCategoryName.trim() || addCategoryLoading}
-                >
-                  {addCategoryLoading ? 'Adding...' : 'Add'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          {addCategoryError && <p className="mb-3 text-sm text-red-400">{addCategoryError}</p>}
+          <form onSubmit={handleAddCategory}>
+            <label htmlFor="new-category-name" className="sr-only">
+              Category name
+            </label>
+            <input
+              id="new-category-name"
+              type="text"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              placeholder="e.g., Artificial Intelligence"
+              className="input p-3 mb-4"
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsAddCategoryModalOpen(false)}
+                className="btn btn-secondary px-6 py-2"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary px-6 py-2"
+                disabled={!newCategoryName.trim() || addCategoryLoading}
+              >
+                {addCategoryLoading ? 'Adding…' : 'Add category'}
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {/* Add Source Modal */}

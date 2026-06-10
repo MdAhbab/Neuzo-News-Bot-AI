@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { JobHistoryItem } from '../types';
 import * as NeuzoApi from '../services/neuzoApi';
-import { ClockIcon, DocumentTextIcon, CheckCircleIcon, XCircleIcon, ArrowPathIcon } from './icons';
+import { ClockIcon, DocumentTextIcon, CheckCircleIcon, XCircleIcon, ArrowPathIcon, ArrowLeftIcon } from './icons';
 
 interface JobHistoryProps {
     onBack: () => void;
@@ -72,14 +72,16 @@ export const JobHistory: React.FC<JobHistoryProps> = ({ onBack, onDownload }) =>
         <div className="w-full max-w-4xl mx-auto">
             <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                    <ClockIcon className="h-7 w-7 text-blue-400" />
-                    Report History
+                    <ClockIcon className="h-6 w-6 text-blue-400" />
+                    Report history
                 </h2>
                 <button
+                    type="button"
                     onClick={onBack}
-                    className="px-4 py-2 text-gray-300 hover:text-white transition-colors"
+                    className="btn btn-subtle px-4 py-2 text-sm font-medium"
                 >
-                    ← Back to Dashboard
+                    <ArrowLeftIcon className="h-4 w-4" />
+                    Back
                 </button>
             </div>
 

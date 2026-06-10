@@ -1,5 +1,42 @@
 @import "tailwindcss";
 
+/* ---------- Design tokens ---------- */
+
+@layer components {
+  /* Surface levels: panel (page-level container), card (inner section) */
+  .panel {
+    @apply bg-black/30 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl;
+  }
+
+  .card {
+    @apply bg-white/5 border border-white/10 rounded-xl;
+  }
+
+  /* Form controls */
+  .input {
+    @apply w-full bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500;
+  }
+
+  /* Buttons: pair `.btn` with a variant class and sizing utilities */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-500 focus-visible:ring-blue-400 disabled:bg-gray-600/50;
+  }
+
+  .btn-secondary {
+    @apply bg-white/10 text-gray-200 hover:bg-white/20 focus-visible:ring-white/50 disabled:opacity-50;
+  }
+
+  .btn-subtle {
+    @apply bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white focus-visible:ring-white/40 disabled:opacity-50;
+  }
+}
+
+/* ---------- Theme ---------- */
+
 @keyframes gradient-animation {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }

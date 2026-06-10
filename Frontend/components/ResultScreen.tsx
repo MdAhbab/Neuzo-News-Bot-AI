@@ -16,24 +16,25 @@ const RefreshIcon = () => (
 
 export const ResultScreen: React.FC<ResultScreenProps> = ({ categoryName, errorMessage, onReset }) => {
   return (
-    <div className="bg-black/30 backdrop-blur-xl p-8 rounded-2xl shadow-2xl w-full max-w-2xl text-center flex flex-col items-center border border-white/10">
-      <XCircleIcon className="h-20 w-20 text-red-400 mb-4" />
-      
-      <h2 className="text-3xl font-bold text-white mb-2">
-        An Error Occurred
+    <div className="panel w-full max-w-2xl p-5 sm:p-8 text-center flex flex-col items-center">
+      <XCircleIcon className="h-16 w-16 text-red-400 mb-4" />
+
+      <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
+        Something went wrong
       </h2>
-      
-      <p className="text-lg text-gray-300 mb-8">
+
+      <p className="text-base text-gray-300 mb-8">
         {errorMessage || `The backend service failed to respond while fetching news for ${categoryName}. Please try again.`}
       </p>
 
       <div className="flex space-x-4">
         <button
+          type="button"
           onClick={onReset}
-          className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent focus:ring-blue-400 transition-colors duration-200"
+          className="btn btn-primary px-6 py-3 shadow-md"
         >
           <RefreshIcon />
-          Try Again
+          Try again
         </button>
       </div>
     </div>

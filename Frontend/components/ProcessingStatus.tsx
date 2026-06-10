@@ -13,10 +13,11 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({ steps, curre
   const progressPercentage = currentStepIndex >= 0 ? ((currentStepIndex + 1) / steps.length) * 100 : 0;
 
   return (
-    <div className="bg-black/30 backdrop-blur-xl p-8 rounded-2xl shadow-2xl w-full max-w-3xl text-center border border-white/10">
-      <h2 className="text-3xl font-bold text-white mb-2">Neuzo is on the job...</h2>
-      <p className="text-lg text-gray-300 mb-6">
-        Your <span className="font-semibold text-blue-400">{categoryName}</span> report is being generated.
+    <div className="panel w-full max-w-3xl p-5 sm:p-8 text-center">
+      <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">Building your report</h2>
+      <p className="text-base text-gray-300 mb-6">
+        Neuzo is fetching and verifying{' '}
+        <span className="font-semibold text-blue-400">{categoryName}</span> coverage.
       </p>
       
       <div className="w-full bg-white/10 rounded-full h-2.5 mb-8">
@@ -29,7 +30,7 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({ steps, curre
           const isCurrent = index === currentStepIndex;
 
           return (
-            <div key={step} className="flex items-center text-lg transition-all duration-300">
+            <div key={step} className="flex items-center text-base transition-all duration-300">
               <div className="flex-shrink-0 h-8 w-8 mr-4 flex items-center justify-center">
                 {isCompleted ? (
                     <CheckCircleIcon className="h-7 w-7 text-green-400" />

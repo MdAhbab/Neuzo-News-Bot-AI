@@ -51,31 +51,37 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   };
 
   return (
-    <div className="w-full max-w-md bg-black/30 backdrop-blur-xl p-8 rounded-2xl shadow-2xl border border-white/10">
+    <div className="panel w-full max-w-md p-6 sm:p-8">
       <div className="text-center mb-6">
-        <BotIcon className="h-16 w-16 mx-auto text-blue-400 mb-2" />
-        <h1 className="text-3xl font-bold text-white">Welcome to Neuzo</h1>
-        <p className="text-gray-300">Your Agentic News Bot</p>
+        <BotIcon className="h-14 w-14 mx-auto text-blue-400 mb-2" />
+        <h1 className="text-2xl font-bold text-white">Welcome to Neuzo</h1>
+        <p className="text-sm text-gray-400">Verified news reports, on demand</p>
       </div>
 
-      <div className="flex border-b border-white/10 mb-6">
+      <div className="flex border-b border-white/10 mb-6" role="tablist" aria-label="Authentication mode">
         <button
+          type="button"
+          role="tab"
+          aria-selected={isLogin}
           onClick={() => {
             setIsLogin(true);
             setError(null);
           }}
-          className={`w-1/2 py-3 text-lg font-semibold transition-colors duration-300 ${isLogin ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400'}`}
+          className={`w-1/2 py-3 font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${isLogin ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'}`}
         >
-          Log In
+          Log in
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={!isLogin}
           onClick={() => {
             setIsLogin(false);
             setError(null);
           }}
-          className={`w-1/2 py-3 text-lg font-semibold transition-colors duration-300 ${!isLogin ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400'}`}
+          className={`w-1/2 py-3 font-semibold transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${!isLogin ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'}`}
         >
-          Sign Up
+          Sign up
         </button>
       </div>
 
@@ -88,51 +94,63 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       <form onSubmit={handleSubmit} className="space-y-6">
         {!isLogin && (
           <div className="relative">
+            <label htmlFor="auth-full-name" className="sr-only">Full name (optional)</label>
             <UserCircleIcon className="h-6 w-6 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
+              id="auth-full-name"
               type="text"
-              placeholder="Full Name (optional)"
+              placeholder="Full name (optional)"
+              autoComplete="name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 border border-white/20 bg-white/5 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
+              className="input pl-12 pr-4 py-3"
             />
           </div>
         )}
 
         <div className="relative">
+          <label htmlFor="auth-email" className="sr-only">Email address</label>
           <UserCircleIcon className="h-6 w-6 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
+            id="auth-email"
             type="email"
-            placeholder="Email Address"
+            placeholder="Email address"
+            autoComplete="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 border border-white/20 bg-white/5 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
+            className="input pl-12 pr-4 py-3"
           />
         </div>
 
         <div className="relative">
+          <label htmlFor="auth-password" className="sr-only">Password</label>
           <LockClosedIcon className="h-6 w-6 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
+            id="auth-password"
             type="password"
             placeholder="Password"
+            autoComplete={isLogin ? 'current-password' : 'new-password'}
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 border border-white/20 bg-white/5 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
+            className="input pl-12 pr-4 py-3"
           />
         </div>
 
         {!isLogin && (
           <div className="relative">
+            <label htmlFor="auth-confirm-password" className="sr-only">Confirm password</label>
             <LockClosedIcon className="h-6 w-6 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
+              id="auth-confirm-password"
               type="password"
-              placeholder="Confirm Password"
+              placeholder="Confirm password"
+              autoComplete="new-password"
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 border border-white/20 bg-white/5 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
+              className="input pl-12 pr-4 py-3"
             />
           </div>
         )}
@@ -140,9 +158,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 bg-blue-600 text-white font-bold text-lg rounded-lg shadow-lg hover:bg-blue-500 transition-all duration-200 transform hover:scale-105 disabled:bg-gray-600/50 disabled:transform-none disabled:cursor-not-allowed"
+          className="btn btn-primary w-full py-3 text-lg shadow-lg"
         >
-          {loading ? 'Please wait...' : (isLogin ? 'Log In' : 'Create Account')}
+          {loading ? 'Please wait…' : (isLogin ? 'Log in' : 'Create account')}
         </button>
       </form>
     </div>
