@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
 import { AppState } from './types';
 import type { Job, Category, User, NewsEngine } from './types';
-import { CATEGORIES, PROCESSING_STEPS, defaultNewCategoryIcon, ICON_MAP } from './constants';
+import { CATEGORIES, PROCESSING_STEPS, ICON_MAP } from './constants';
 import * as NeuzoApi from './services/neuzoApi';
 import { CategoryCard } from './components/CategoryCard';
 import { ProcessingStatus } from './components/ProcessingStatus';

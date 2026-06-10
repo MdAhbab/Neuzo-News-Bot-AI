@@ -52,8 +52,6 @@ export const CATEGORIES: Category[] = [
   },
 ];
 
-export const defaultNewCategoryIcon = NewspaperIcon;
-
 // Must match PROCESSING_STEPS in backend/api_server.py exactly — the
 // processing screen matches the polled step string against this list.
 export const PROCESSING_STEPS = (categoryName: string) => [
