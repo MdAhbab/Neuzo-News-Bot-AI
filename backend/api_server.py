@@ -16,7 +16,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 from config import get_output_dir, load_config
-from database import init_database
+from database import get_db, init_database
 from models import Category, Job, NewsSource, User
 
 # Configure logging
@@ -268,6 +268,40 @@ def process_job_background(job_id: str, category_name: str, sources: list,
         verified_count = sum(1 for r in verification_results if r.verified)
         logger.info(f"Job {job_id}: Verified {verified_count} articles")
 
+        # Build per-article result list with sentiment/tone
+        from text_analysis import sentiment as ta_sentiment, tone as ta_tone
+        article_dicts = []
+        for i, r in enumerate(verification_results):
+            article = r.article
+            text_for_analysis = f"{article.title}. {article.description or ''}"
+            pub_iso = (
+                article.published_at.isoformat()
+                if article.published_at else ""
+            )
+            article_dicts.append({
+                'id': f"a{i}",
+                'title': article.title,
+                'source': article.source,
+                'url': article.url,
+                'confidence': round(r.confidence, 3),
+                'crossRefs': len(r.similar_sources),
+                'excerpt': (article.description or "")[:300],
+                'publishedAt': pub_iso,
+                'sentiment': round(ta_sentiment(text_for_analysis), 3),
+                'tone': ta_tone(text_for_analysis),
+                'similar': [
+                    {
+                        'source': s.get('source', ''),
+                        'title': s.get('title', ''),
+                        'similarity': round(float(s.get('similarity', 0)), 3),
+                    }
+                    for s in r.similar_sources
+                ],
+            })
+
+        confidences = [d['confidence'] for d in article_dicts]
+        avg_conf = round(sum(confidences) / len(confidences), 3) if confidences else None
+
         # Step 5: Detect duplicates
         Job.update_status(job_id, 'Processing', PROCESSING_STEPS[4].format(category=category_name))
 
@@ -288,8 +322,13 @@ def process_job_background(job_id: str, category_name: str, sources: list,
             )
             for step in PROCESSING_STEPS
         ]
-        Job.complete(job_id, report_path, report_name, agent_actions,
-                     articles_count=len(articles), verified_count=verified_count)
+        Job.complete(
+            job_id, report_path, report_name, agent_actions,
+            articles_count=len(articles), verified_count=verified_count,
+            articles_json=json.dumps(article_dicts),
+            avg_confidence=avg_conf,
+            engine=provider_used,
+        )
         logger.info(f"Job {job_id} completed - {len(verification_results)} articles processed")
 
     except Exception as e:
@@ -436,9 +475,11 @@ def get_categories():
     try:
         categories = Category.get_all()
         sources_by_category = NewsSource.get_urls_grouped_by_category()
+        source_objects_by_category = NewsSource.get_objects_grouped_by_category()
 
         for cat in categories:
             cat['defaultSources'] = sources_by_category.get(cat['category_id'], [])
+            cat['sources'] = source_objects_by_category.get(cat['category_id'], [])
 
         return jsonify(categories), 200
 
@@ -628,7 +669,7 @@ def start_job():
         job_id = f"job-{datetime.now().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
 
         # Create job in database
-        db_job_id = Job.create(job_id, request.user_id, category_id, sources)
+        db_job_id = Job.create(job_id, request.user_id, category_id, sources, engine)
 
         if db_job_id:
             thread = threading.Thread(
@@ -676,8 +717,14 @@ def get_job_status(job_id: str):
             response['reportName'] = job['report_name']
             response['usedSources'] = Job.decode_list(job['sources_used'])
             response['agentActions'] = Job.decode_list(job['agent_actions'])
-            response['articlesCount'] = job.get('articles_count')
-            response['verifiedCount'] = job.get('verified_count')
+            response['articlesCount'] = job.get('articles_count') or 0
+            response['verifiedCount'] = job.get('verified_count') or 0
+            response['avgConfidence'] = float(job['avg_confidence']) if job.get('avg_confidence') is not None else 0.0
+            response['engine'] = job.get('engine') or 'auto'
+            try:
+                response['articles'] = json.loads(job['articles_json']) if job.get('articles_json') else []
+            except (json.JSONDecodeError, TypeError):
+                response['articles'] = []
         elif job['status'] == 'Error':
             response['message'] = job['error_message']
 
@@ -726,14 +773,423 @@ def get_job_history():
         limit = max(1, min(request.args.get('limit', 50, type=int), 200))
         jobs = Job.get_user_jobs(request.user_id, limit)
 
-        # Strip server-side paths from the payload
+        result = []
         for job in jobs:
             job.pop('report_path', None)
+            job.pop('articles_json', None)
+            job.pop('lens_json', None)
+            # Ensure engine is surfaced
+            if 'engine' not in job or job['engine'] is None:
+                job['engine'] = 'auto'
+            result.append(job)
 
-        return jsonify(jobs), 200
+        return jsonify(result), 200
 
     except Exception as e:
         logger.error(f"Get job history error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============= Source Management =============
+
+@app.route('/api/sources/by-id/<int:source_id>', methods=['DELETE'])
+@require_auth
+def delete_source_by_id(source_id: int):
+    """Soft-delete a news source (set is_active=FALSE)"""
+    try:
+        success = NewsSource.deactivate(source_id)
+        if success:
+            return jsonify({'success': True}), 200
+        return jsonify({'error': 'Failed to deactivate source'}), 400
+    except Exception as e:
+        logger.error(f"Delete source error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============= Job Graph / Lens / Copilot =============
+
+def _load_job_articles(job_id: str, user_id: int):
+    """
+    Helper: load job and its articles_json.
+    Returns (job, articles_list) or raises a tuple (response, status_code).
+    """
+    job = Job.get_by_job_id(job_id)
+    if not job:
+        raise ValueError('not_found')
+    if job['user_id'] != user_id:
+        raise PermissionError('forbidden')
+    try:
+        articles = json.loads(job['articles_json']) if job.get('articles_json') else []
+    except (json.JSONDecodeError, TypeError):
+        articles = []
+    return job, articles
+
+
+@app.route('/api/jobs/<job_id>/graph', methods=['GET'])
+@require_auth
+def get_job_graph(job_id: str):
+    """Return a graph of sources and articles derived from persisted article data"""
+    try:
+        try:
+            job, articles = _load_job_articles(job_id, request.user_id)
+        except ValueError:
+            return jsonify({'error': 'Job not found'}), 404
+        except PermissionError:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        nodes = []
+        edges = []
+        source_conf: dict = {}  # source_name -> list of confidences
+
+        for art in articles:
+            source_conf.setdefault(art['source'], []).append(art['confidence'])
+
+        # Source nodes
+        source_node_ids = {}
+        for idx, (src, confs) in enumerate(source_conf.items()):
+            node_id = f"s{idx}"
+            source_node_ids[src] = node_id
+            avg = round(sum(confs) / len(confs), 3) if confs else 0.6
+            nodes.append({
+                'id': node_id,
+                'label': src,
+                'type': 'source',
+                'weight': round(0.4 + avg * 0.6, 3),
+                'confidence': avg,
+            })
+
+        # Article nodes + source→article edges
+        for art in articles:
+            nodes.append({
+                'id': art['id'],
+                'label': art['title'][:80],
+                'type': 'article',
+                'weight': round(0.4 + art['confidence'] * 0.6, 3),
+                'confidence': art['confidence'],
+                'articleId': art['id'],
+            })
+            src_node = source_node_ids.get(art['source'])
+            if src_node:
+                edges.append({
+                    'from': src_node,
+                    'to': art['id'],
+                    'strength': art['confidence'],
+                })
+
+        # Article↔article edges from similar list
+        article_id_set = {a['id'] for a in articles}
+        for art in articles:
+            for sim in art.get('similar', []):
+                # Find a matching article node by source+title prefix
+                for other in articles:
+                    if other['id'] == art['id']:
+                        continue
+                    if (other['source'] == sim.get('source') and
+                            other['title'][:40] == sim.get('title', '')[:40]):
+                        edge_key = tuple(sorted([art['id'], other['id']]))
+                        if edge_key not in article_id_set:
+                            article_id_set.add(str(edge_key))
+                            edges.append({
+                                'from': art['id'],
+                                'to': other['id'],
+                                'strength': sim.get('similarity', 0.0),
+                            })
+                        break
+
+        return jsonify({'nodes': nodes, 'edges': edges}), 200
+
+    except Exception as e:
+        logger.error(f"Get job graph error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/jobs/<job_id>/lens', methods=['GET'])
+@require_auth
+def get_job_lens(job_id: str):
+    """Return bias/tone lens data for a job, caching result in lens_json"""
+    try:
+        try:
+            job, articles = _load_job_articles(job_id, request.user_id)
+        except ValueError:
+            return jsonify({'error': 'Job not found'}), 404
+        except PermissionError:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        # Return cached lens if available
+        if job.get('lens_json'):
+            try:
+                return jsonify(json.loads(job['lens_json'])), 200
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not articles:
+            lens = {'balance': 0.0, 'spread': 0.0, 'articles': []}
+            return jsonify(lens), 200
+
+        from text_analysis import sentiment as ta_sentiment, tone as ta_tone
+
+        per_article = []
+        for art in articles:
+            text = f"{art.get('title', '')}. {art.get('excerpt', '')}"
+            per_article.append({
+                'id': art['id'],
+                'sentiment': art.get('sentiment', round(ta_sentiment(text), 3)),
+                'tone': art.get('tone', ta_tone(text)),
+            })
+
+        sentiments = [a['sentiment'] for a in per_article]
+        balance = round(sum(sentiments) / len(sentiments), 3)
+
+        # Population std dev
+        mean = balance
+        variance = sum((s - mean) ** 2 for s in sentiments) / len(sentiments)
+        spread = round(variance ** 0.5, 3)
+
+        lens = {'balance': balance, 'spread': spread, 'articles': per_article}
+
+        # Persist to lens_json
+        db = get_db()
+        try:
+            db.execute_update(
+                "UPDATE jobs SET lens_json = %s WHERE job_id = %s",
+                (json.dumps(lens), job_id)
+            )
+        except Exception:
+            pass  # Non-fatal
+
+        return jsonify(lens), 200
+
+    except Exception as e:
+        logger.error(f"Get job lens error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/jobs/<job_id>/copilot', methods=['POST'])
+@require_auth
+def job_copilot(job_id: str):
+    """Answer a question about a job's articles using retrieval + optional LLM"""
+    try:
+        try:
+            job, articles = _load_job_articles(job_id, request.user_id)
+        except ValueError:
+            return jsonify({'error': 'Job not found'}), 404
+        except PermissionError:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        data = request.json or {}
+        message = data.get('message', '').strip()
+        if not message:
+            return jsonify({'error': 'message required'}), 400
+
+        # Lexical overlap ranking
+        query_words = set(message.lower().split())
+
+        def overlap(art):
+            text_words = set((art.get('title', '') + ' ' + art.get('excerpt', '')).lower().split())
+            return len(query_words & text_words)
+
+        ranked = sorted(articles, key=overlap, reverse=True)
+        top_hits = [a for a in ranked if overlap(a) > 0][:5]
+
+        steps = [{'tool': 'search_archive', 'detail': f"Searched {len(articles)} articles for: {message[:80]}"}]
+
+        if top_hits:
+            steps.append({'tool': 'get_article', 'detail': f"Retrieved: {top_hits[0]['title'][:80]}"})
+
+        if len(top_hits) >= 2:
+            steps.append({'tool': 'compare_sources', 'detail': f"Compared {len(top_hits)} sources on this topic"})
+
+        # Try Ollama first
+        answer = None
+        config = load_config()
+        ollama_cfg = config.get('ollama', {})
+        try:
+            from news_crawler import OllamaClient
+            client = OllamaClient(
+                host=ollama_cfg.get('host', 'http://localhost:11434'),
+                model=ollama_cfg.get('model', 'gemma4:e4b'),
+                timeout=int(ollama_cfg.get('timeout_seconds', 60)),
+            )
+            if client.is_available():
+                context = "\n\n".join(
+                    f"[{a['source']}] {a['title']}: {a['excerpt']}"
+                    for a in top_hits
+                ) if top_hits else "No relevant articles found."
+                prompt = (
+                    f"You are a news analyst. A user asks: \"{message}\"\n\n"
+                    f"Relevant articles:\n{context}\n\n"
+                    "Answer concisely in 2-3 sentences, citing the sources above."
+                )
+                answer = client.generate(prompt)
+        except Exception as e:
+            logger.warning(f"Copilot Ollama call failed: {e}")
+
+        if not answer:
+            if top_hits:
+                strongest = max(top_hits, key=lambda a: a.get('confidence', 0))
+                weakest = min(top_hits, key=lambda a: a.get('confidence', 0))
+                titles = "; ".join(f'"{a["title"][:50]}"' for a in top_hits[:3])
+                answer = (
+                    f"Based on {len(top_hits)} retrieved article(s) — {titles} — "
+                    f"the strongest corroboration comes from {strongest['source']} "
+                    f"(confidence {strongest.get('confidence', 0):.2f}) and the weakest "
+                    f"from {weakest['source']} (confidence {weakest.get('confidence', 0):.2f}). "
+                    f"Cross-reference count: {sum(a.get('crossRefs', 0) for a in top_hits)}."
+                )
+            else:
+                answer = f"No articles in this report directly match your query: \"{message}\"."
+
+        return jsonify({'steps': steps, 'answer': answer}), 200
+
+    except Exception as e:
+        logger.error(f"Copilot error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============= Briefing =============
+
+def _build_briefing(user_id: int) -> dict:
+    """Gather recent complete jobs and build a briefing payload"""
+    from datetime import timezone
+
+    config = load_config()
+    ollama_cfg = config.get('ollama', {})
+
+    # Collect articles from jobs completed in the last 7 days
+    recent_jobs = Job.get_user_jobs(user_id, limit=20)
+    now = datetime.now()
+    all_articles = []
+    tool_trace = [{'ts': now.isoformat(), 'tool': 'list_jobs',
+                   'detail': f"Found {len(recent_jobs)} recent job(s)"}]
+
+    for job in recent_jobs:
+        if job.get('status') != 'Complete':
+            continue
+        try:
+            created = job.get('created_at')
+            if created:
+                if hasattr(created, 'replace'):
+                    age = (now - created.replace(tzinfo=None)).days
+                else:
+                    age = 999
+                if age > 7:
+                    continue
+        except Exception:
+            pass
+
+        try:
+            arts = json.loads(job['articles_json']) if job.get('articles_json') else []
+        except (json.JSONDecodeError, TypeError):
+            arts = []
+
+        for art in arts:
+            art['_category'] = job.get('category_name', '')
+            art['_category_id'] = job.get('category_id', '')
+        all_articles.extend(arts)
+
+    tool_trace.append({
+        'ts': datetime.now().isoformat(),
+        'tool': 'load_articles',
+        'detail': f"Loaded {len(all_articles)} articles across recent jobs",
+    })
+
+    # Pick top ~6 by confidence
+    top = sorted(all_articles, key=lambda a: a.get('confidence', 0), reverse=True)[:6]
+
+    # Try Ollama for summaries
+    ollama_client = None
+    try:
+        from news_crawler import OllamaClient
+        client = OllamaClient(
+            host=ollama_cfg.get('host', 'http://localhost:11434'),
+            model=ollama_cfg.get('model', 'gemma4:e4b'),
+            timeout=int(ollama_cfg.get('timeout_seconds', 60)),
+        )
+        if client.is_available():
+            ollama_client = client
+    except Exception:
+        pass
+
+    stories = []
+    for story_idx, art in enumerate(top):
+        excerpt = art.get('excerpt', '')
+        title = art.get('title', '')
+        source = art.get('source', '')
+        category = art.get('_category', '')
+        confidence = art.get('confidence', 0.0)
+
+        if ollama_client:
+            try:
+                sum_prompt = (
+                    f"Summarise this news article in exactly 2 sentences:\n"
+                    f"Title: {title}\nExcerpt: {excerpt[:400]}"
+                )
+                summary = ollama_client.generate(sum_prompt) or excerpt[:200]
+                why_prompt = (
+                    f"In one sentence, why does this story matter?\n"
+                    f"Title: {title}\nExcerpt: {excerpt[:300]}"
+                )
+                why = ollama_client.generate(why_prompt) or f"Reported by {source}."
+            except Exception:
+                summary = excerpt[:200] or title
+                why = f"Reported by {source}."
+        else:
+            summary = excerpt[:200] or title
+            why = (
+                f"Reported by {source} with {art.get('crossRefs', 0)} "
+                "corroborating source(s)."
+            )
+
+        stories.append({
+            'id': f"brief-{story_idx}-{art.get('id', '')}",
+            'category': category,
+            'headline': title,
+            'summary': summary,
+            'whyItMatters': why,
+            'confidence': confidence,
+        })
+
+    tool_trace.append({
+        'ts': datetime.now().isoformat(),
+        'tool': 'rank_stories',
+        'detail': f"Selected top {len(stories)} stories by confidence",
+    })
+
+    hour = datetime.now().hour
+    if hour < 12:
+        greeting = "Good morning"
+    elif hour < 18:
+        greeting = "Good afternoon"
+    else:
+        greeting = "Good evening"
+
+    return {
+        'greeting': greeting,
+        'date': now.date().isoformat(),
+        'stories': stories,
+        'toolTrace': tool_trace,
+    }
+
+
+@app.route('/api/briefing', methods=['GET'])
+@require_auth
+def get_briefing():
+    """Return a personalised briefing from recent completed jobs"""
+    try:
+        return jsonify(_build_briefing(request.user_id)), 200
+    except Exception as e:
+        logger.error(f"Get briefing error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/briefing/generate', methods=['POST'])
+@require_auth
+def generate_briefing():
+    """Force-regenerate the briefing (same logic, no cache)"""
+    try:
+        return jsonify(_build_briefing(request.user_id)), 200
+    except Exception as e:
+        logger.error(f"Generate briefing error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 

@@ -147,9 +147,9 @@ def install_frontend_dependencies():
     """Install Node.js dependencies for frontend"""
     print_step("Step 6: Installing Frontend Dependencies")
     
-    frontend_path = Path("Frontend")
+    frontend_path = Path("frontend")
     if not frontend_path.exists():
-        print_error("Frontend directory not found")
+        print_error("frontend directory not found")
         return False
     
     os.chdir(frontend_path)
@@ -381,7 +381,7 @@ def print_completion_message():
    python backend/api_server.py
 
 2. Start the Frontend (in a new terminal):
-   {Colors.OKCYAN}cd Frontend{Colors.ENDC}
+   {Colors.OKCYAN}cd frontend{Colors.ENDC}
    {Colors.OKCYAN}npm run dev{Colors.ENDC}
 
 3. Access the Application:
@@ -449,7 +449,7 @@ def main():
     for step in steps:
         if not step():
             print_error(f"\nSetup failed at: {step.__name__}")
-            print_info("Please fix the error and run setup.py again")
+            print_info("Please fix the error and run run.py again")
             sys.exit(1)
     
     # Success!
@@ -471,8 +471,8 @@ def run_servers():
         
         print_info("Starting frontend server...")
         frontend_process = subprocess.Popen(
-            "npm run dev", 
-            cwd="Frontend", 
+            "npm run dev",
+            cwd="frontend",
             shell=True
         )
         

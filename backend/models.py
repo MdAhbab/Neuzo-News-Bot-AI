@@ -241,6 +241,41 @@ class NewsSource:
         return grouped
 
     @staticmethod
+    def get_objects_grouped_by_category() -> Dict[str, List[Dict[str, Any]]]:
+        """Get active sources (id, url, name) grouped by category_id (single query)"""
+        db = get_db()
+        query = """
+            SELECT c.category_id, ns.id, ns.source_url, ns.source_name
+            FROM news_sources ns
+            JOIN categories c ON ns.category_id = c.id
+            WHERE ns.is_active = TRUE AND c.is_active = TRUE
+            ORDER BY ns.reliability_score DESC, ns.source_name ASC
+        """
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for row in db.execute_query(query):
+            grouped.setdefault(row['category_id'], []).append({
+                'id': row['id'],
+                'url': row['source_url'],
+                'name': row['source_name'] or row['source_url'],
+            })
+        return grouped
+
+    @staticmethod
+    def deactivate(source_id: int) -> bool:
+        """Soft-delete a source by setting is_active = FALSE"""
+        db = get_db()
+        try:
+            db.execute_update(
+                "UPDATE news_sources SET is_active = FALSE WHERE id = %s",
+                (source_id,)
+            )
+            logger.info(f"Source deactivated: id={source_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deactivating source {source_id}: {e}")
+            return False
+
+    @staticmethod
     def update_last_checked(source_id: int):
         """Update last checked timestamp for a source"""
         db = get_db()
@@ -268,7 +303,8 @@ class Job:
         return value.split(',')
 
     @staticmethod
-    def create(job_id: str, user_id: int, category_id: str, sources_used: List[str]) -> Optional[int]:
+    def create(job_id: str, user_id: int, category_id: str, sources_used: List[str],
+               engine: Optional[str] = None) -> Optional[int]:
         """Create a new job"""
         db = get_db()
         try:
@@ -276,14 +312,14 @@ class Job:
             category = Category.get_by_category_id(category_id)
             if not category:
                 return None
-            
+
             query = """
-                INSERT INTO jobs (job_id, user_id, category_id, status, sources_used)
-                VALUES (%s, %s, %s, 'Pending', %s)
+                INSERT INTO jobs (job_id, user_id, category_id, status, sources_used, engine)
+                VALUES (%s, %s, %s, 'Pending', %s, %s)
             """
             j_id = db.execute_update(
                 query,
-                (job_id, user_id, category['id'], json.dumps(sources_used))
+                (job_id, user_id, category['id'], json.dumps(sources_used), engine)
             )
             logger.info(f"Job created: {job_id}")
             return j_id
@@ -313,18 +349,26 @@ class Job:
 
     @staticmethod
     def complete(job_id: str, report_path: str, report_name: str, agent_actions: List[str],
-                 articles_count: Optional[int] = None, verified_count: Optional[int] = None):
-        """Mark job as complete"""
+                 articles_count: Optional[int] = None, verified_count: Optional[int] = None,
+                 articles_json: Optional[str] = None,
+                 avg_confidence: Optional[float] = None,
+                 engine: Optional[str] = None):
+        """Mark job as complete and persist per-article results"""
         db = get_db()
         query = """
             UPDATE jobs
             SET status = 'Complete', report_path = %s, report_name = %s,
                 agent_actions = %s, articles_count = %s, verified_count = %s,
+                articles_json = %s, avg_confidence = %s, engine = COALESCE(%s, engine),
                 completed_at = NOW()
             WHERE job_id = %s
         """
-        db.execute_update(query, (report_path, report_name, json.dumps(agent_actions),
-                                  articles_count, verified_count, job_id))
+        db.execute_update(query, (
+            report_path, report_name, json.dumps(agent_actions),
+            articles_count, verified_count,
+            articles_json, avg_confidence, engine,
+            job_id,
+        ))
         logger.info(f"Job completed: {job_id}")
     
     @staticmethod

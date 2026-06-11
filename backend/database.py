@@ -146,6 +146,14 @@ _MIGRATIONS = [
      "ALTER TABLE jobs ADD COLUMN articles_count INT DEFAULT NULL"),
     ("jobs", "verified_count",
      "ALTER TABLE jobs ADD COLUMN verified_count INT DEFAULT NULL"),
+    ("jobs", "articles_json",
+     "ALTER TABLE jobs ADD COLUMN articles_json TEXT NULL"),
+    ("jobs", "avg_confidence",
+     "ALTER TABLE jobs ADD COLUMN avg_confidence DECIMAL(4,3) NULL"),
+    ("jobs", "lens_json",
+     "ALTER TABLE jobs ADD COLUMN lens_json TEXT NULL"),
+    ("jobs", "engine",
+     "ALTER TABLE jobs ADD COLUMN engine VARCHAR(20) NULL"),
 ]
 
 

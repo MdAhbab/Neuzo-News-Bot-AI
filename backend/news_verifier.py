@@ -10,6 +10,7 @@ process-wide.
 
 from typing import Dict, List, Optional
 import logging
+import re
 
 import numpy as np
 
@@ -18,17 +19,66 @@ logger = logging.getLogger(__name__)
 # Module-level model cache for singleton pattern
 _model_cache: Dict[str, object] = {}
 
+# Flag set once we know sentence_transformers is unavailable
+_SENTENCE_TRANSFORMERS_AVAILABLE: Optional[bool] = None
+
+
+class _HashingEncoder:
+    """
+    Pure-numpy fallback encoder used when sentence_transformers / torch are
+    not installed.  Implements a bag-of-words TF-IDF-style encoding via a
+    simple hash trick, then L2-normalises so cosine similarity still works.
+    Results are lower quality than transformer embeddings but keep
+    cross-corroboration functional.
+    """
+
+    DIM = 512
+
+    def encode(self, texts: List[str], show_progress_bar: bool = False) -> np.ndarray:  # noqa: ARG002
+        matrix = np.zeros((len(texts), self.DIM), dtype=np.float32)
+        for i, text in enumerate(texts):
+            tokens = re.findall(r"[a-z]+", text.lower())
+            for token in tokens:
+                idx = hash(token) % self.DIM
+                matrix[i, idx] += 1.0
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return matrix / norms
+
 
 def get_cached_model(model_name: str):
-    """Get or load a cached SentenceTransformer model (singleton pattern)"""
-    if model_name not in _model_cache:
-        # Lazy import: torch + transformers are heavy (~500MB RSS); only pay
-        # that cost when verification is actually used.
-        from sentence_transformers import SentenceTransformer
+    """
+    Get or load a cached SentenceTransformer model (singleton pattern).
+    Falls back to a pure-numpy hashing encoder when sentence_transformers
+    or torch cannot be imported.
+    """
+    global _SENTENCE_TRANSFORMERS_AVAILABLE
 
+    if model_name in _model_cache:
+        return _model_cache[model_name]
+
+    # Determine availability on first call
+    if _SENTENCE_TRANSFORMERS_AVAILABLE is None:
+        try:
+            from sentence_transformers import SentenceTransformer  # noqa: F401
+            _SENTENCE_TRANSFORMERS_AVAILABLE = True
+        except ImportError:
+            _SENTENCE_TRANSFORMERS_AVAILABLE = False
+            logger.warning(
+                "sentence_transformers is not installed (torch may also be missing). "
+                "Falling back to a pure-numpy hashing encoder for news verification. "
+                "Install sentence-transformers for higher-quality cross-corroboration."
+            )
+
+    if _SENTENCE_TRANSFORMERS_AVAILABLE:
+        from sentence_transformers import SentenceTransformer
         logger.info(f"Loading NLP model: {model_name}...")
         _model_cache[model_name] = SentenceTransformer(model_name)
         logger.info(f"Model {model_name} loaded and cached")
+    else:
+        _model_cache[model_name] = _HashingEncoder()
+        logger.info("Using hashing encoder fallback for model slot: %s", model_name)
+
     return _model_cache[model_name]
 
 

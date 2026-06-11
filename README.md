@@ -11,14 +11,14 @@ An intelligent news aggregation and verification system that fetches, verifies, 
 
 ```bash
 # 1. Clone and run the automated setup
-python setup.py
+python run.py
 
 # 2. Start the backend
 .\.venv\Scripts\Activate.ps1      # Windows  (Linux/Mac: source .venv/bin/activate)
 python backend/api_server.py
 
 # 3. Start the frontend (new terminal)
-cd Frontend
+cd frontend
 npm run dev
 
 # 4. Open http://localhost:3000 and log in with:
@@ -50,7 +50,7 @@ The engine can be chosen per-report in the UI, or set globally via `news_pipelin
 
 ### Local LLM (Ollama)
 
-The crawler can use a locally hosted model (default `gemma4:e4b`) as an editorial agent: it filters articles for category relevance and writes clean two-sentence summaries. This is the **only** feature that talks to Ollama — verification still uses sentence-transformers.
+The crawler uses a locally hosted model (default `gemma4:e4b`) as an editorial agent: it filters articles for category relevance and writes clean two-sentence summaries. The same model also powers the **Daily Briefing** and **Report Copilot** agents (see [AGENTS.md](AGENTS.md)). Semantic verification does **not** use Ollama — it uses sentence-transformers (with a pure-numpy fallback). Every Ollama-backed feature degrades gracefully when the model is offline.
 
 ```bash
 # Optional: install Ollama (https://ollama.com) and pull the model
@@ -58,6 +58,25 @@ ollama pull gemma4:e4b
 ```
 
 If Ollama is not running, the crawler simply skips curation and returns raw articles — nothing breaks.
+
+### Agents
+
+Beyond crawler curation, `gemma4:e4b` powers a suite of tool-using agents (shipped and planned) — the Editorial Curator, Category Architect, Briefing Composer, Bias & Sentiment Analyst, and Report Copilot. Each agent's tools, loops, and endpoint contracts are documented in [AGENTS.md](AGENTS.md).
+
+---
+
+## ✨ The frontend
+
+A from-scratch React 18 + Vite + TypeScript app styled with Tailwind CSS v4, animated with GSAP + ScrollTrigger, Lenis smooth scrolling, a Three.js / react-three-fiber hero scene, and framer-motion micro-interactions — in an editorial "Verified Press" theme with light/dark modes. All scroll/motion effects honor `prefers-reduced-motion`, and every Three.js canvas is wrapped in an error boundary. Routing is handled by react-router; the live backend is reached through `frontend/src/app/lib/api.ts` (set `VITE_API_URL`, default `http://localhost:5000/api`).
+
+Four agentic features ship with it (all backed by real endpoints — see [AGENTS.md](AGENTS.md)):
+
+| Feature | What it does |
+|---|---|
+| **Neuzo Pulse** | Interactive 3D verification graph (Three.js) — sources, articles, and cross-corroboration links for each report, colored by confidence |
+| **Daily Briefing** | A gemma-composed morning digest across your categories: top verified stories with summaries and "why it matters" lines |
+| **Bias & Sentiment Lens** | Per-article sentiment and tone analysis plus a report-level coverage-balance meter, toggleable inside Report View |
+| **Report Copilot ("Ask Neuzo")** | Chat with a tool-using agent about any completed report — answers cite articles and show their reasoning trace |
 
 ---
 
@@ -69,7 +88,7 @@ If Ollama is not running, the crawler simply skips curation and returns raw arti
 │                                                                  │
 │  ┌──────────────┐       ┌──────────────┐      ┌────────────┐    │
 │  │   Frontend   │──────▶│  Flask API   │─────▶│   MySQL    │    │
-│  │ React 19+TS  │       │   Backend    │      │  Database  │    │
+│  │ React 18+TS  │       │   Backend    │      │  Database  │    │
 │  └──────────────┘       └──────┬───────┘      └────────────┘    │
 │                                │                                 │
 │                 ┌──────────────┼──────────────┐                  │
@@ -90,9 +109,9 @@ If Ollama is not running, the crawler simply skips curation and returns raw arti
 
 ### Technology Stack
 
-**Backend** — Python 3.13+, Flask 3 (REST API), MySQL 8 (connection-pooled), NewsAPI + RSS crawler, Sentence-Transformers (`all-MiniLM-L6-v2`), Ollama (optional, crawler-only), bcrypt, python-docx.
+**Backend** — Python 3.13+, Flask 3 (REST API), MySQL 8 (connection-pooled), NewsAPI + RSS crawler, Sentence-Transformers (`all-MiniLM-L6-v2`, with a pure-numpy fallback), Ollama (optional, for curation/briefing/copilot), a stdlib sentiment/tone analyzer, bcrypt, python-docx.
 
-**Frontend** — React 19, TypeScript, Vite, Tailwind CSS v4 (built, not CDN).
+**Frontend** — React 18, TypeScript, Vite 6, Tailwind CSS v4 (built, not CDN), GSAP + ScrollTrigger, Lenis, Three.js (react-three-fiber), framer-motion, react-router, Radix UI, recharts, sonner.
 
 ---
 
@@ -115,7 +134,9 @@ If Ollama is not running, the crawler simply skips curation and returns raw arti
 4. Score each article: 60% base confidence for well-formed content, boosted by up to 40% based on how strongly other outlets corroborate it
 5. Mark verified when confidence ≥ the configured threshold (default 0.7)
 
-**Model:** `sentence-transformers/all-MiniLM-L6-v2` — 22.7M params, ~90MB, ~3000 sentences/sec on CPU, no GPU required.
+**Model:** `sentence-transformers/all-MiniLM-L6-v2` — 22.7M params, ~90MB, ~3000 sentences/sec on CPU, no GPU required. If `sentence-transformers`/`torch` aren't installed, the verifier transparently falls back to a pure-numpy hashing encoder so the pipeline still completes (lower-quality scores, no crash).
+
+Per-article results (confidence, cross-references, excerpt, plus a sentiment score and tone label from `backend/text_analysis.py`) are persisted as JSON on the job row, which is what powers the Report View, Pulse graph, Lens, Briefing, and Copilot.
 
 ### 3. Document generation
 
@@ -125,11 +146,12 @@ If Ollama is not running, the crawler simply skips curation and returns raw arti
 
 ```
 POST /api/jobs/start  →  job row created  →  background thread:
-  fetch (newsapi | crawler | auto) → verify (NLP) → generate .docx
-  → job marked Complete with articles_count / verified_count
+  fetch (newsapi | crawler | auto) → verify (NLP) → tag sentiment/tone → generate .docx
+  → job marked Complete with articles_json / avg_confidence / articles_count / verified_count
 
-Frontend polls GET /api/jobs/<id>/status every 2.5s,
-then downloads via GET /api/jobs/<id>/download (Bearer auth, ownership-checked)
+Frontend polls GET /api/jobs/<id>/status every 2.5s (tolerating 3 failures); on
+Complete the status payload carries the full per-article ledger, then the report
+downloads via GET /api/jobs/<id>/download (Bearer auth, ownership-checked)
 ```
 
 ---
@@ -142,13 +164,19 @@ then downloads via GET /api/jobs/<id>/download (Bearer auth, ownership-checked)
 | POST | `/api/auth/login` | — | Login (rate-limited 10/min) |
 | POST | `/api/auth/logout` | ✅ | Invalidate session |
 | GET | `/api/auth/me` | ✅ | Current user (session restore) |
-| GET | `/api/categories` | ✅ | Categories + default sources |
+| GET | `/api/categories` | ✅ | Categories + sources (`{id, url, name}`) |
 | POST | `/api/categories` | ✅ | Create custom category |
+| POST | `/api/categories/suggest` | ✅ | AI-suggest a category + sources (Ollama; 503 if offline) |
 | GET/POST | `/api/sources/<category_id>` | ✅ | List / add news sources |
+| DELETE | `/api/sources/by-id/<id>` | ✅ | Remove a source (soft delete) |
 | POST | `/api/jobs/start` | ✅ | Start report job (`{category, sources, engine}`) |
-| GET | `/api/jobs/<id>/status` | ✅ | Poll job progress |
+| GET | `/api/jobs/<id>/status` | ✅ | Poll job progress (carries the article ledger on Complete) |
 | GET | `/api/jobs/<id>/download` | ✅ | Download .docx (owner only) |
+| GET | `/api/jobs/<id>/graph` | ✅ | Pulse graph — sources, articles, corroboration edges |
+| GET | `/api/jobs/<id>/lens` | ✅ | Bias & sentiment lens (balance, spread, per-article tone) |
+| POST | `/api/jobs/<id>/copilot` | ✅ | Ask a question about the report (retrieval + optional Ollama) |
 | GET | `/api/jobs/history` | ✅ | User's past reports |
+| GET/POST | `/api/briefing` · `/api/briefing/generate` | ✅ | Daily Briefing across the user's recent reports |
 | GET | `/api/health` | — | Health check |
 
 ---
@@ -161,7 +189,7 @@ MySQL database `neuzo_db` (see [backend/database_schema.sql](backend/database_sc
 - **categories** — category_id, name, icon_name, is_custom, created_by
 - **news_sources** — category FK, source_url, source_type (web/rss/api), reliability_score
 - **user_categories** — user ↔ category preferences
-- **jobs** — job_id, user FK, category FK, status, current_step, report path/name, sources_used, agent_actions, error_message, **articles_count**, **verified_count**, timestamps
+- **jobs** — job_id, user FK, category FK, status, current_step, report path/name, sources_used, agent_actions, error_message, articles_count, verified_count, **articles_json**, **avg_confidence**, **lens_json**, **engine**, timestamps
 
 Older databases are migrated automatically at server start (missing columns are added idempotently).
 
@@ -177,10 +205,10 @@ Older databases are migrated automatically at server start (missing columns are 
 ### Automated
 
 ```bash
-python setup.py
+python run.py
 ```
 
-Checks prerequisites, creates the venv, installs backend + frontend dependencies, writes `backend/config.yaml`, imports the schema, and creates the `test@neuzo.com` test user.
+Checks prerequisites, creates the venv, installs backend + frontend dependencies, writes `backend/config.yaml`, imports the schema, creates the `test@neuzo.com` test user, and starts both servers.
 
 ### Manual
 
@@ -195,7 +223,7 @@ mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS neuzo_db;"
 mysql -u root -p neuzo_db < backend/database_schema.sql
 
 # Frontend
-cd Frontend && npm install
+cd frontend && npm install
 ```
 
 ### Configuration
@@ -238,23 +266,32 @@ Covers password hashing, the similarity math, crawler JSON-decision parsing and 
 
 ```
 Neuzo-News-Bot-AI/
-├── setup.py                   # Automated installer
+├── run.py                     # Automated installer + server launcher
+├── AGENTS.md                  # gemma4:e4b agents, tools, and endpoint contracts
 ├── backend/
-│   ├── api_server.py          # Flask REST API
+│   ├── api_server.py          # Flask REST API (auth, jobs, graph/lens/copilot/briefing)
 │   ├── config.py              # Config loader (.env + env overrides)
 │   ├── config.yaml            # Default configuration
-│   ├── database.py            # MySQL pool + migrations
+│   ├── database.py            # MySQL pool + idempotent migrations
 │   ├── models.py              # User / Category / NewsSource / Job
 │   ├── news_fetcher.py        # NewsAPI + RSS fetching
 │   ├── news_crawler.py        # Local agentic crawler (+ Ollama curation)
-│   ├── news_verifier.py       # NLP verification engine
+│   ├── news_verifier.py       # NLP verification (sentence-transformers + numpy fallback)
+│   ├── text_analysis.py       # Stdlib sentiment + tone analyzer
 │   ├── document_generator.py  # Word document generator
 │   ├── database_schema.sql    # MySQL schema + seed data
 │   ├── requirements.txt       # Python dependencies (lean)
 │   ├── .env.example           # Environment variable template
 │   ├── output/                # Generated reports (gitignored)
 │   └── tests/                 # Pytest suite
-└── Frontend/                  # React app (see Frontend/README.md)
+└── frontend/                  # React 18 + Vite + Tailwind v4 app
+    ├── index.html
+    ├── vite.config.ts         # Dev server on :3000
+    ├── .env.example           # VITE_API_URL
+    └── src/app/
+        ├── lib/api.ts         # Backend client + adapters (single integration point)
+        ├── pages/             # Landing, Auth, Dashboard, Job, History, Briefing, Pulse
+        └── components/        # UI, three.js hero, Pulse graph, Copilot, Report view
 ```
 
 ---
