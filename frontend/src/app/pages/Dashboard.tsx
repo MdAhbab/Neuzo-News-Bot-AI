@@ -39,7 +39,7 @@ export default function Dashboard() {
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
-    api.getCategories().then(setCategories);
+    api.getCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
 
   const selected = categories?.find((c) => c.id === selectedId) ?? null;
@@ -55,15 +55,23 @@ export default function Dashboard() {
     const url = sourceInput.trim();
     if (!isValidUrl(url)) return toast.error("Enter a valid URL");
     setSourceInput("");
-    await api.addSource(selected.id, url.startsWith("http") ? url : "https://" + url);
-    await refresh(selected.id);
-    toast.success("Source added");
+    try {
+      await api.addSource(selected.id, url.startsWith("http") ? url : "https://" + url);
+      await refresh(selected.id);
+      toast.success("Source added");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't add source");
+    }
   };
 
   const removeSource = async (sourceId: string) => {
     if (!selected) return;
-    await api.removeSource(selected.id, sourceId);
-    await refresh(selected.id);
+    try {
+      await api.removeSource(selected.id, sourceId);
+      await refresh(selected.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't remove source");
+    }
   };
 
   const generate = async () => {
@@ -72,6 +80,8 @@ export default function Dashboard() {
     try {
       const job = await api.startJob(selected, selected.sources.map((s) => s.url), engine);
       navigate(`/app/jobs/${job.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't start the report");
     } finally {
       setStarting(false);
     }
@@ -266,6 +276,8 @@ function AddCategoryModal({
       onCreated(created.id);
       onOpenChange(false);
       reset();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't create category");
     } finally {
       setCreating(false);
     }

@@ -42,7 +42,17 @@ export function Copilot({ jobId }: { jobId: string }) {
     setInput("");
     setBusy(true);
     setMsgs((m) => [...m, { id: "u" + Date.now(), role: "user", text: q }]);
-    const reply = await api.copilot(jobId, q);
+    let reply;
+    try {
+      reply = await api.copilot(jobId, q);
+    } catch {
+      setMsgs((m) => [
+        ...m,
+        { id: "e" + Date.now(), role: "agent", text: "I couldn't reach the report service. Please try again." },
+      ]);
+      setBusy(false);
+      return;
+    }
     const id = "a" + Date.now();
     setMsgs((m) => [...m, { id, role: "agent", text: "", steps: reply.steps, streaming: true }]);
 
