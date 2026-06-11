@@ -2,6 +2,7 @@ import type {
   Briefing,
   Category,
   CopilotReply,
+  Coverage,
   Engine,
   Job,
   LensReport,
@@ -329,9 +330,10 @@ export async function getHistory(): Promise<Job[]> {
   }));
 }
 
-export async function downloadReport(job: Job): Promise<void> {
+/** Authenticated blob download with Content-Disposition filename parsing. */
+async function blobDownload(path: string, fallbackName: string): Promise<void> {
   const token = getToken();
-  const res = await fetch(`${BASE}/jobs/${job.id}/download`, {
+  const res = await fetch(`${BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 
@@ -340,7 +342,7 @@ export async function downloadReport(job: Job): Promise<void> {
     throw new Error(`Download failed with status ${res.status}`);
   }
 
-  let filename = `neuzo-${job.categorySlug}-${job.id}.docx`;
+  let filename = fallbackName;
   const disposition = res.headers.get("Content-Disposition");
   if (disposition) {
     const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";\n]+)/i);
@@ -358,6 +360,14 @@ export async function downloadReport(job: Job): Promise<void> {
   a.click();
   window.URL.revokeObjectURL(url);
   document.body.removeChild(a);
+}
+
+export async function downloadReport(job: Job): Promise<void> {
+  await blobDownload(`/jobs/${job.id}/download`, `neuzo-${job.categorySlug}-${job.id}.docx`);
+}
+
+export async function exportReport(jobId: string, fmt: "md" | "json"): Promise<void> {
+  await blobDownload(`/jobs/${jobId}/export/${fmt}`, `neuzo-report.${fmt}`);
 }
 
 /* ---------------- Agentic feature endpoints ---------------- */
@@ -382,6 +392,11 @@ export async function copilot(id: string, message: string): Promise<CopilotReply
     method: "POST",
     body: JSON.stringify({ message }),
   });
+  return res.json();
+}
+
+export async function getCoverage(): Promise<Coverage> {
+  const res = await apiFetch("/analytics/coverage");
   return res.json();
 }
 

@@ -1,6 +1,7 @@
 import { ChevronDown, RefreshCw, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { toast } from "sonner";
 import * as api from "../lib/api";
 import type { Briefing as BriefingData } from "../lib/types";
 import { ConfidenceChip, Eyebrow } from "../components/common";
@@ -12,7 +13,11 @@ export default function Briefing() {
   const [refreshing, setRefreshing] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
 
-  const load = () => api.getBriefing().then(setData);
+  const load = () =>
+    api
+      .getBriefing()
+      .then(setData)
+      .catch(() => toast.error("Couldn't load the briefing."));
   useEffect(() => {
     load();
   }, []);

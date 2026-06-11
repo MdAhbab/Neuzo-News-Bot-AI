@@ -21,6 +21,7 @@ import History from "./pages/History";
 import Briefing from "./pages/Briefing";
 
 const Pulse = lazy(() => import("./pages/Pulse"));
+const Analytics = lazy(() => import("./pages/Analytics"));
 
 function FullLoader() {
   return (
@@ -63,6 +64,14 @@ function AppRoutes() {
         />
         <Route path="/app/history" element={<History />} />
         <Route path="/app/briefing" element={<Briefing />} />
+        <Route
+          path="/app/analytics"
+          element={
+            <Suspense fallback={<FullLoader />}>
+              <Analytics />
+            </Suspense>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,12 +1,18 @@
-import { Download, Eye, EyeOff, Network, ScrollText, Wrench } from "lucide-react";
+import { ChevronDown, Download, Eye, EyeOff, FileDown, Network, ScrollText, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import * as api from "../../lib/api";
 import type { Article, Job, LensReport, PulseGraph as Graph } from "../../lib/types";
 import { ConfidenceChip, Eyebrow } from "../common";
 import { PulseGraph } from "../canvas/PulseGraph";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { Copilot } from "../Copilot";
-import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { cn } from "../ui/utils";
 
 type Tab = "sources" | "agent" | "lens" | "pulse";
@@ -24,11 +30,31 @@ export function ReportView({ job }: { job: Job }) {
   const [graph, setGraph] = useState<Graph | null>(null);
 
   useEffect(() => {
-    api.getLens(job.id).then(setLens);
+    let active = true;
+    api.getLens(job.id).then((l) => active && setLens(l)).catch(() => active && setLens(null));
+    return () => {
+      active = false;
+    };
   }, [job.id]);
   useEffect(() => {
-    if (tab === "pulse" && !graph) api.getGraph(job.id).then(setGraph);
+    if (tab === "pulse" && !graph) api.getGraph(job.id).then(setGraph).catch(() => {});
   }, [tab, graph, job.id]);
+
+  const exportAs = async (fmt: "md" | "json") => {
+    try {
+      await api.exportReport(job.id, fmt);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    }
+  };
+
+  const download = async () => {
+    try {
+      await api.downloadReport(job);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Download failed");
+    }
+  };
 
   const scrollToArticle = (articleId: string) => {
     const el = document.getElementById(`article-${articleId}`);
@@ -98,9 +124,23 @@ export function ReportView({ job }: { job: Job }) {
       {/* RIGHT RAIL */}
       <aside className="lg:sticky lg:top-20 lg:self-start">
         <div className="border border-border bg-card p-5">
-          <Button onClick={() => api.downloadReport(job)} className="w-full rounded-sm bg-primary text-primary-foreground hover:opacity-90">
-            <Download className="mr-2 h-4 w-4" /> Download .docx
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-none transition-opacity hover:opacity-90">
+              <Download className="h-4 w-4" /> Export report
+              <ChevronDown className="h-4 w-4 opacity-70" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width] min-w-44">
+              <DropdownMenuItem onClick={download}>
+                <Download className="mr-2 h-4 w-4" /> Word (.docx)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportAs("md")}>
+                <FileDown className="mr-2 h-4 w-4" /> Markdown (.md)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportAs("json")}>
+                <FileDown className="mr-2 h-4 w-4" /> JSON (.json)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <div className="mt-5 grid grid-cols-4 gap-px border border-border bg-border">
             {([

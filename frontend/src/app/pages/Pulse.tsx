@@ -13,7 +13,7 @@ export default function Pulse() {
   const [graph, setGraph] = useState<Graph | null>(null);
 
   useEffect(() => {
-    if (jobId) api.getGraph(jobId).then(setGraph);
+    if (jobId) api.getGraph(jobId).then(setGraph).catch(() => setGraph({ nodes: [], edges: [] }));
   }, [jobId]);
 
   return (

@@ -115,3 +115,24 @@ export interface SuggestResult {
   icon: string;
   sources: { url: string; recommended: boolean }[];
 }
+
+export interface CoverageCategory {
+  category: string;
+  jobs: number;
+  articles: number;
+  verified: number;
+  avgConfidence: number;
+}
+
+export interface CoveragePoint {
+  date: string;
+  jobs: number;
+  articles: number;
+  verified: number;
+}
+
+export interface Coverage {
+  totals: { jobs: number; articles: number; verified: number; avgConfidence: number };
+  categories: CoverageCategory[];
+  timeline: CoveragePoint[];
+}
