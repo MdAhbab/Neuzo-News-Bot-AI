@@ -100,7 +100,12 @@ INSERT INTO news_sources (category_id, source_url, source_name, source_type, rel
 (1, 'https://arstechnica.com', 'Ars Technica', 'web', 0.89),
 (1, 'https://www.technologyreview.com', 'MIT Technology Review', 'web', 0.92),
 (1, 'https://venturebeat.com', 'VentureBeat', 'web', 0.85),
-(1, 'https://www.cnet.com', 'CNET', 'web', 0.83);
+(1, 'https://www.cnet.com', 'CNET', 'web', 0.83),
+(1, 'https://www.thedailystar.net/tech-startup', 'The Daily Star Tech', 'web', 0.80),
+(1, 'https://www.dhakatribune.com/technology', 'Dhaka Tribune Tech', 'web', 0.80),
+(1, 'https://en.prothomalo.com/science-tech', 'Prothom Alo Tech', 'web', 0.80),
+(1, 'https://bdnews24.com/technology', 'BDNews24 Tech', 'web', 0.80),
+(1, 'https://www.tbsnews.net/tech', 'TBS Tech', 'web', 0.80);
 
 -- Insert default news sources for World News
 INSERT INTO news_sources (category_id, source_url, source_name, source_type, reliability_score) VALUES
@@ -110,7 +115,12 @@ INSERT INTO news_sources (category_id, source_url, source_name, source_type, rel
 (2, 'https://www.aljazeera.com', 'Al Jazeera', 'web', 0.88),
 (2, 'https://www.theguardian.com', 'The Guardian', 'web', 0.89),
 (2, 'https://www.nytimes.com', 'The New York Times', 'web', 0.91),
-(2, 'https://www.cnn.com', 'CNN', 'web', 0.85);
+(2, 'https://www.cnn.com', 'CNN', 'web', 0.85),
+(2, 'https://www.thedailystar.net/world', 'The Daily Star World', 'web', 0.80),
+(2, 'https://www.dhakatribune.com/world', 'Dhaka Tribune World', 'web', 0.80),
+(2, 'https://en.prothomalo.com/world', 'Prothom Alo World', 'web', 0.80),
+(2, 'https://bdnews24.com/world', 'BDNews24 World', 'web', 0.80),
+(2, 'https://www.newagebd.net/category/world', 'New Age World', 'web', 0.80);
 
 -- Insert default news sources for Business
 INSERT INTO news_sources (category_id, source_url, source_name, source_type, reliability_score) VALUES
@@ -120,7 +130,12 @@ INSERT INTO news_sources (category_id, source_url, source_name, source_type, rel
 (3, 'https://www.forbes.com', 'Forbes', 'web', 0.87),
 (3, 'https://www.businessinsider.com', 'Business Insider', 'web', 0.84),
 (3, 'https://www.cnbc.com', 'CNBC', 'web', 0.86),
-(3, 'https://www.marketwatch.com', 'MarketWatch', 'web', 0.85);
+(3, 'https://www.marketwatch.com', 'MarketWatch', 'web', 0.85),
+(3, 'https://thefinancialexpress.com.bd', 'Financial Express BD', 'web', 0.80),
+(3, 'https://www.tbsnews.net/economy', 'TBS Economy', 'web', 0.80),
+(3, 'https://www.thedailystar.net/business', 'The Daily Star Business', 'web', 0.80),
+(3, 'https://www.dhakatribune.com/business', 'Dhaka Tribune Business', 'web', 0.80),
+(3, 'https://en.prothomalo.com/business', 'Prothom Alo Business', 'web', 0.80);
 
 -- Insert default news sources for Healthcare
 INSERT INTO news_sources (category_id, source_url, source_name, source_type, reliability_score) VALUES

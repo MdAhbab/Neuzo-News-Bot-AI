@@ -39,6 +39,16 @@ function App() {
   const [addCategoryError, setAddCategoryError] = useState<string | null>(null);
   const [addCategoryLoading, setAddCategoryLoading] = useState(false);
 
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<{
+    category_id: string;
+    name: string;
+    icon_name: string;
+    recommended_sources: { url: string; name: string }[];
+  } | null>(null);
+  const [selectedAiSources, setSelectedAiSources] = useState<Set<string>>(new Set());
+
   const [selectedEngine, setSelectedEngine] = useState<NewsEngine>('auto');
   const [startingJob, setStartingJob] = useState(false);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
@@ -197,7 +207,34 @@ function App() {
   const openAddCategoryModal = () => {
     setAddCategoryError(null);
     setNewCategoryName('');
+    setAiPrompt('');
+    setAiSuggestion(null);
+    setSelectedAiSources(new Set());
     setIsAddCategoryModalOpen(true);
+  };
+
+  const handleAiSuggest = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiGenerating(true);
+    setAddCategoryError(null);
+    try {
+      const suggestion = await NeuzoApi.suggestCategory(aiPrompt.trim());
+      setAiSuggestion(suggestion);
+      setNewCategoryName(suggestion.name);
+      setSelectedAiSources(new Set(suggestion.recommended_sources.map(s => s.url)));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate suggestion';
+      setAddCategoryError(msg);
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  const toggleAiSource = (url: string) => {
+    const newSet = new Set(selectedAiSources);
+    if (newSet.has(url)) newSet.delete(url);
+    else newSet.add(url);
+    setSelectedAiSources(newSet);
   };
 
   const handleAddCategory = async (e: FormEvent) => {
@@ -206,9 +243,21 @@ function App() {
     setAddCategoryError(null);
     setAddCategoryLoading(true);
 
-    const slug = newCategoryName.trim().toLowerCase().replace(/\s+/g, '_');
+    const slug = aiSuggestion?.category_id || newCategoryName.trim().toLowerCase().replace(/\s+/g, '_');
+    const iconName = aiSuggestion?.icon_name || 'NewspaperIcon';
+    
     try {
-      await NeuzoApi.createCategory(slug, newCategoryName.trim());
+      const newCat = await NeuzoApi.createCategory(slug, newCategoryName.trim(), iconName);
+      
+      if (aiSuggestion && selectedAiSources.size > 0) {
+        for (const source of aiSuggestion.recommended_sources) {
+          if (selectedAiSources.has(source.url)) {
+            // Add the source
+            await NeuzoApi.addSource(slug, source.url, source.name, 'web', 0.8).catch(() => {});
+          }
+        }
+      }
+      
       await loadCategories();
       setIsAddCategoryModalOpen(false);
       setNewCategoryName('');
@@ -514,13 +563,38 @@ function App() {
       {isAddCategoryModalOpen && (
         <Modal
           title="Add a category"
-          subtitle="Custom categories are saved to your account."
+          subtitle="Use AI to generate a category and recommend sources, or type a name to add it manually."
           onClose={() => setIsAddCategoryModalOpen(false)}
         >
           {addCategoryError && <p className="mb-3 text-sm text-red-400">{addCategoryError}</p>}
-          <form onSubmit={handleAddCategory}>
-            <label htmlFor="new-category-name" className="sr-only">
-              Category name
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="e.g. Bangladeshi Tech Startups"
+              className="input p-3 flex-grow"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAiSuggest();
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleAiSuggest}
+              disabled={!aiPrompt.trim() || aiGenerating}
+              className="btn bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl flex items-center justify-center font-medium shadow-md transition-all whitespace-nowrap disabled:opacity-50"
+            >
+              {aiGenerating ? <SpinnerIcon className="h-5 w-5 animate-spin mr-1.5" /> : <BotIcon className="h-5 w-5 mr-1.5" />}
+              {aiGenerating ? 'Thinking...' : 'AI Suggest'}
+            </button>
+          </div>
+          
+          <form onSubmit={handleAddCategory} className="border-t border-white/10 pt-4 mt-2">
+            <label htmlFor="new-category-name" className="block text-sm font-medium text-gray-300 mb-1.5 text-left">
+              Category Name
             </label>
             <input
               id="new-category-name"
@@ -530,7 +604,30 @@ function App() {
               placeholder="e.g., Artificial Intelligence"
               className="input p-3 mb-4"
             />
-            <div className="flex justify-end gap-3">
+            
+            {aiSuggestion && (
+              <div className="mb-4 text-left">
+                <p className="text-sm font-medium text-blue-300 mb-2">Recommended Sources:</p>
+                <div className="space-y-2 max-h-40 overflow-y-auto bg-black/20 p-2 rounded-xl border border-white/5">
+                  {aiSuggestion.recommended_sources.map((src, idx) => (
+                    <label key={idx} className="flex items-center gap-3 p-2 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-colors border border-transparent hover:border-white/10">
+                      <input
+                        type="checkbox"
+                        checked={selectedAiSources.has(src.url)}
+                        onChange={() => toggleAiSource(src.url)}
+                        className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
+                      />
+                      <div className="flex flex-col flex-grow min-w-0">
+                        <span className="text-sm font-medium text-gray-200 truncate">{src.name}</span>
+                        <span className="text-xs text-gray-400 truncate">{src.url}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="flex justify-end gap-3 mt-2">
               <button
                 type="button"
                 onClick={() => setIsAddCategoryModalOpen(false)}
@@ -540,10 +637,11 @@ function App() {
               </button>
               <button
                 type="submit"
-                className="btn btn-primary px-6 py-2"
+                className="btn btn-primary px-6 py-2 flex items-center justify-center"
                 disabled={!newCategoryName.trim() || addCategoryLoading}
               >
-                {addCategoryLoading ? 'Adding…' : 'Add category'}
+                {addCategoryLoading ? <SpinnerIcon className="h-5 w-5 animate-spin mr-1.5" /> : null}
+                {addCategoryLoading ? 'Adding...' : 'Add category'}
               </button>
             </div>
           </form>

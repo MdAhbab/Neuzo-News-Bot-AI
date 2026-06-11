@@ -45,7 +45,7 @@ try:
     limiter = Limiter(
         key_func=get_remote_address,
         app=app,
-        default_limits=["200 per day", "50 per hour"],
+        default_limits=["5000 per day", "1000 per hour"],
         storage_uri=os.getenv('REDIS_URL', 'memory://')
     )
     RATE_LIMITING_ENABLED = True
@@ -471,6 +471,79 @@ def create_category():
         return jsonify({'error': 'Internal server error'}), 500
 
 
+@app.route('/api/categories/suggest', methods=['POST'])
+@require_auth
+def suggest_category():
+    """Use NLP to suggest a category name, icon, and sources based on a prompt"""
+    try:
+        data = request.json or {}
+        prompt = data.get('prompt', '').strip()
+        
+        if not prompt:
+            return jsonify({'error': 'Prompt required'}), 400
+            
+        from news_crawler import OllamaClient
+        from config import load_config
+        
+        config = load_config()
+        ollama_cfg = config.get('ollama', {})
+        client = OllamaClient(
+            host=ollama_cfg.get('host', 'http://localhost:11434'),
+            model=ollama_cfg.get('model', 'gemma4:e4b'),
+            timeout=int(ollama_cfg.get('timeout_seconds', 60))
+        )
+        
+        if not client.is_available():
+            return jsonify({'error': 'Ollama AI is not running or model is not available.'}), 503
+            
+        system_prompt = (
+            "You are an AI assistant that helps users create news categories.\n"
+            f"The user wants a news category for: '{prompt}'\n"
+            "Return a JSON object with EXACTLY this structure:\n"
+            "{\n"
+            '  "category_id": "short_snake_case_id",\n'
+            '  "name": "Display Name",\n'
+            '  "icon_name": "One of: CpuChipIcon, GlobeAltIcon, ChartBarIcon, HealthIcon, FireIcon, SparklesIcon, NewspaperIcon, CodeBracketIcon",\n'
+            '  "recommended_sources": [\n'
+            '    { "url": "https://...", "name": "..." },\n'
+            '    { "url": "https://...", "name": "..." },\n'
+            '    { "url": "https://...", "name": "..." }\n'
+            "  ]\n"
+            "}\n"
+            "Include 3-5 real, reputable news website URLs. ONLY output the raw JSON."
+        )
+        
+        raw_response = client.generate(system_prompt, json_mode=True)
+        if not raw_response:
+            return jsonify({'error': 'Failed to generate suggestions.'}), 500
+            
+        import json
+        try:
+            # Clean up the response in case the model wraps it in markdown blocks
+            clean_response = raw_response.strip()
+            if clean_response.startswith('```json'):
+                clean_response = clean_response[7:]
+            if clean_response.startswith('```'):
+                clean_response = clean_response[3:]
+            if clean_response.endswith('```'):
+                clean_response = clean_response[:-3]
+                
+            suggestion = json.loads(clean_response.strip())
+            
+            # Basic validation
+            if 'category_id' not in suggestion or 'name' not in suggestion or 'recommended_sources' not in suggestion:
+                raise ValueError("Missing required fields")
+                
+            return jsonify(suggestion), 200
+        except Exception as e:
+            logger.error(f"Failed to parse Ollama response: {e}\nRaw: {raw_response}")
+            return jsonify({'error': 'AI generated invalid data format.'}), 500
+            
+    except Exception as e:
+        logger.error(f"Suggest category error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
 # ============= News Source Endpoints =============
 
 @app.route('/api/sources/<category_id>', methods=['GET'])
@@ -580,6 +653,7 @@ def start_job():
 
 @app.route('/api/jobs/<job_id>/status', methods=['GET'])
 @require_auth
+@rate_limit("120 per minute")
 def get_job_status(job_id: str):
     """Get job status"""
     try:

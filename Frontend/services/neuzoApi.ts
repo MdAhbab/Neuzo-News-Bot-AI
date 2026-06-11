@@ -117,6 +117,20 @@ export const createCategory = async (
   });
 };
 
+export const suggestCategory = async (
+  prompt: string
+): Promise<{
+  category_id: string;
+  name: string;
+  icon_name: string;
+  recommended_sources: { url: string; name: string }[];
+}> => {
+  return apiCall('/categories/suggest', {
+    method: 'POST',
+    body: JSON.stringify({ prompt }),
+  });
+};
+
 // ============= Source API =============
 
 export const getSources = async (category_id: string): Promise<unknown[]> => {
