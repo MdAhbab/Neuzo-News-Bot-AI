@@ -1,8 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, Loader2, X } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { HeroScene } from "../components/three/HeroScene";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Logo } from "../components/common";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -10,6 +9,10 @@ import { useAuth } from "../lib/store";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+
+const HeroScene = lazy(() =>
+  import("../components/three/HeroScene").then((m) => ({ default: m.HeroScene })),
+);
 
 export default function Auth() {
   const { signIn, signUp } = useAuth();
@@ -129,7 +132,9 @@ export default function Auth() {
       {/* visual side */}
       <div className="relative hidden overflow-hidden border-l border-border bg-background lg:block">
         <ErrorBoundary fallback={<div className="h-full w-full bg-secondary" />}>
-          <HeroScene className="absolute inset-0" />
+          <Suspense fallback={<div className="h-full w-full bg-secondary" />}>
+            <HeroScene className="absolute inset-0" />
+          </Suspense>
         </ErrorBoundary>
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-background via-transparent to-transparent" />
         <div className="absolute bottom-12 left-12 right-12">

@@ -1,11 +1,14 @@
 import { ArrowRight, ArrowUpRight } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import { lazy, Suspense, useLayoutEffect, useRef } from "react";
 import { Link } from "react-router";
 import { gsap, ScrollTrigger } from "../lib/gsap";
 import { getLenis } from "../components/SmoothScroll";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
-import { HeroScene } from "../components/three/HeroScene";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+
+const HeroScene = lazy(() =>
+  import("../components/three/HeroScene").then((m) => ({ default: m.HeroScene })),
+);
 import { ImageWithFallback } from "../components/custom/ImageWithFallback";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { IMAGES } from "../lib/images";
@@ -199,7 +202,9 @@ export default function Landing() {
       {/* HERO */}
       <section id="hero" className="relative flex min-h-screen items-center overflow-hidden pt-28">
         <ErrorBoundary fallback={<div />}>
-          <HeroScene progressRef={heroProgress} className="pointer-events-none absolute inset-0 opacity-90" />
+          <Suspense fallback={null}>
+            <HeroScene progressRef={heroProgress} className="pointer-events-none absolute inset-0 opacity-90" />
+          </Suspense>
         </ErrorBoundary>
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/40 via-transparent to-background" />
 

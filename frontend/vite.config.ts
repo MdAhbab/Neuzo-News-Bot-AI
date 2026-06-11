@@ -37,4 +37,21 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  build: {
+    // Split the heaviest libraries into separate, cacheable chunks so the
+    // initial app bundle stays lean. three.js loads only with the hero/Pulse
+    // scenes; recharts only with the Analytics route.
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('three') || id.includes('@react-three')) return 'three'
+          if (id.includes('recharts') || id.includes('d3-') || id.includes('victory')) return 'charts'
+          if (id.includes('@radix-ui')) return 'radix'
+          if (id.includes('/motion') || id.includes('framer-motion') || id.includes('/gsap')) return 'motion'
+        },
+      },
+    },
+  },
 })
