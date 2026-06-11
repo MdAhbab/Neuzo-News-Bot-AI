@@ -43,14 +43,14 @@ Neuzo is a full-stack application that:
 | Engine | How it works | When to use |
 |---|---|---|
 | `newsapi` | NewsAPI top headlines (needs an API key, 100 req/day free) | Fast, broad coverage |
-| `crawler` | Discovers RSS/Atom feeds on your selected sources, fetches concurrently, optionally curates with a local Ollama model | No quota, fully on-device |
-| `auto` (default) | NewsAPI first; falls back to the crawler on quota errors, empty results, or a missing key | Best of both |
+| `crawler` | Discovers RSS/Atom feeds on your selected sources (with an HTML headline-scrape fallback for feed-less sites), fetches concurrently, and curates with a local Ollama model | No quota, fully on-device |
+| `auto` (default) | NewsAPI first; when results are thin it **merges in** the on-device crawler (`newsapi+crawler`), and falls back to the crawler entirely on quota errors or a missing key | Best of both |
 
 The engine can be chosen per-report in the UI, or set globally via `news_pipeline.provider` in [backend/config.yaml](backend/config.yaml).
 
 ### Local LLM (Ollama)
 
-The crawler uses a locally hosted model (default `gemma4:e4b`) as an editorial agent: it filters articles for category relevance and writes clean two-sentence summaries. The same model also powers the **Daily Briefing** and **Report Copilot** agents (see [AGENTS.md](AGENTS.md)). Semantic verification does **not** use Ollama — it uses sentence-transformers (with a pure-numpy fallback). Every Ollama-backed feature degrades gracefully when the model is offline.
+Ollama (`gemma4:e4b`) is scoped to **news-getting only**: it acts as the crawler's editorial agent (filtering articles for category relevance and writing clean two-sentence summaries) and powers the `categories/suggest` source recommender. It is deliberately **not** used anywhere else — verification (sentence-transformers + numpy fallback), the Lens, the Daily Briefing, and the Report Copilot are all deterministic and run without it.
 
 ```bash
 # Optional: install Ollama (https://ollama.com) and pull the model
@@ -61,7 +61,7 @@ If Ollama is not running, the crawler simply skips curation and returns raw arti
 
 ### Agents
 
-Beyond crawler curation, `gemma4:e4b` powers a suite of tool-using agents (shipped and planned) — the Editorial Curator, Category Architect, Briefing Composer, Bias & Sentiment Analyst, and Report Copilot. Each agent's tools, loops, and endpoint contracts are documented in [AGENTS.md](AGENTS.md).
+`gemma4:e4b` powers the **Editorial Curator** (crawler) and **Category Architect** (`categories/suggest`); the **Briefing Composer**, **Bias & Sentiment Analyst** (Lens), **Report Copilot**, and **Pulse graph** are deterministic, dependency-free agents that read persisted verification data. Each agent's tools, loops, and endpoint contracts are documented in [AGENTS.md](AGENTS.md).
 
 ---
 
@@ -69,14 +69,19 @@ Beyond crawler curation, `gemma4:e4b` powers a suite of tool-using agents (shipp
 
 A from-scratch React 18 + Vite + TypeScript app styled with Tailwind CSS v4, animated with GSAP + ScrollTrigger, Lenis smooth scrolling, a Three.js / react-three-fiber hero scene, and framer-motion micro-interactions — in an editorial "Verified Press" theme with light/dark modes. All scroll/motion effects honor `prefers-reduced-motion`, and every Three.js canvas is wrapped in an error boundary. Routing is handled by react-router; the live backend is reached through `frontend/src/app/lib/api.ts` (set `VITE_API_URL`, default `http://localhost:5000/api`).
 
-Four agentic features ship with it (all backed by real endpoints — see [AGENTS.md](AGENTS.md)):
+Headline features (all backed by real endpoints — see [AGENTS.md](AGENTS.md)):
 
 | Feature | What it does |
 |---|---|
 | **Neuzo Pulse** | Interactive 3D verification graph (Three.js) — sources, articles, and cross-corroboration links for each report, colored by confidence |
-| **Daily Briefing** | A gemma-composed morning digest across your categories: top verified stories with summaries and "why it matters" lines |
+| **Daily Briefing** | A morning digest across your categories: top verified stories with summaries and "why it matters" lines |
 | **Bias & Sentiment Lens** | Per-article sentiment and tone analysis plus a report-level coverage-balance meter, toggleable inside Report View |
-| **Report Copilot ("Ask Neuzo")** | Chat with a tool-using agent about any completed report — answers cite articles and show their reasoning trace |
+| **Report Copilot ("Ask Neuzo")** | Chat about any completed report — answers cite articles and show their retrieval trace |
+| **Coverage Analytics** | A `/app/analytics` dashboard charting report volume, verified counts, and confidence over time and by category |
+| **Multi-format export** | Download any report as Word (`.docx`), Markdown (`.md`), or JSON |
+| **Archive search & ⌘K** | Search/filter the report archive, plus a command palette (⌘K) for navigation and quick actions |
+
+See [frontend/README.md](frontend/README.md) for the frontend stack, routes, and structure.
 
 ---
 
@@ -121,8 +126,9 @@ Four agentic features ship with it (all backed by real endpoints — see [AGENTS
 
 `backend/news_fetcher.py` (NewsAPI) and `backend/news_crawler.py` (local crawler):
 
-- **NewsAPI path**: one `top_headlines` request per job (page_size 100), sorted and trimmed locally. Quota errors are detected and trigger the crawler fallback in `auto` mode.
-- **Crawler path**: for each of the user's selected source URLs, the crawler discovers RSS/Atom feeds (`<link rel="alternate">` tags, then common paths like `/feed`, `/rss.xml`), fetches them concurrently with strict timeouts, dedupes by URL/title, and — when Ollama is available — asks the local model to keep only category-relevant articles and rewrite their summaries. Discovered feeds are cached per domain for the life of the process.
+- **NewsAPI path**: one `top_headlines` request per job (page_size 100), sorted and trimmed locally. Quota errors are detected and trigger the crawler in `auto` mode.
+- **Crawler path**: for each of the user's selected source URLs, the crawler discovers RSS/Atom feeds (`<link rel="alternate">` tags, then common paths like `/feed`, `/rss.xml`), fetches them concurrently with strict timeouts, and — for sources that advertise no feed — falls back to **HTML headline scraping** (BeautifulSoup, same-site links only). It dedupes by URL/title and, when Ollama is available, asks the local model to keep only category-relevant articles and rewrite their summaries. Discovered feeds are cached per domain for the life of the process.
+- **`auto` merge**: when NewsAPI returns fewer than half the requested items, `auto` also runs the crawler and merges both result sets (deduped), reporting the provider as `newsapi+crawler`.
 
 ### 2. News verification
 
@@ -131,7 +137,7 @@ Four agentic features ship with it (all backed by real endpoints — see [AGENTS
 1. Load the NLP model lazily on first use (cached process-wide afterwards)
 2. Embed `title + description` into 384-dim vectors
 3. Compute a cosine-similarity matrix (pure numpy)
-4. Score each article: 60% base confidence for well-formed content, boosted by up to 40% based on how strongly other outlets corroborate it
+4. Score each article: 60% base confidence for full content (50% for title-only headlines scraped from feed-less sources), boosted by up to 40% based on how strongly other outlets corroborate it
 5. Mark verified when confidence ≥ the configured threshold (default 0.7)
 
 **Model:** `sentence-transformers/all-MiniLM-L6-v2` — 22.7M params, ~90MB, ~3000 sentences/sec on CPU, no GPU required. If `sentence-transformers`/`torch` aren't installed, the verifier transparently falls back to a pure-numpy hashing encoder so the pipeline still completes (lower-quality scores, no crash).
@@ -172,10 +178,12 @@ downloads via GET /api/jobs/<id>/download (Bearer auth, ownership-checked)
 | POST | `/api/jobs/start` | ✅ | Start report job (`{category, sources, engine}`) |
 | GET | `/api/jobs/<id>/status` | ✅ | Poll job progress (carries the article ledger on Complete) |
 | GET | `/api/jobs/<id>/download` | ✅ | Download .docx (owner only) |
+| GET | `/api/jobs/<id>/export/<md\|json>` | ✅ | Export the report as Markdown or JSON |
 | GET | `/api/jobs/<id>/graph` | ✅ | Pulse graph — sources, articles, corroboration edges |
 | GET | `/api/jobs/<id>/lens` | ✅ | Bias & sentiment lens (balance, spread, per-article tone) |
-| POST | `/api/jobs/<id>/copilot` | ✅ | Ask a question about the report (retrieval + optional Ollama) |
+| POST | `/api/jobs/<id>/copilot` | ✅ | Ask a question about the report (deterministic retrieval) |
 | GET | `/api/jobs/history` | ✅ | User's past reports |
+| GET | `/api/analytics/coverage` | ✅ | Coverage analytics (totals, per-category, 30-day timeline) |
 | GET/POST | `/api/briefing` · `/api/briefing/generate` | ✅ | Daily Briefing across the user's recent reports |
 | GET | `/api/health` | — | Health check |
 
@@ -269,16 +277,17 @@ Neuzo-News-Bot-AI/
 ├── run.py                     # Automated installer + server launcher
 ├── AGENTS.md                  # gemma4:e4b agents, tools, and endpoint contracts
 ├── backend/
-│   ├── api_server.py          # Flask REST API (auth, jobs, graph/lens/copilot/briefing)
+│   ├── api_server.py          # Flask REST API (auth, jobs, export, graph/lens/copilot/briefing, analytics)
 │   ├── config.py              # Config loader (.env + env overrides)
 │   ├── config.yaml            # Default configuration
 │   ├── database.py            # MySQL pool + idempotent migrations
 │   ├── models.py              # User / Category / NewsSource / Job
 │   ├── news_fetcher.py        # NewsAPI + RSS fetching
-│   ├── news_crawler.py        # Local agentic crawler (+ Ollama curation)
+│   ├── news_crawler.py        # Local agentic crawler (RSS + HTML scrape + Ollama curation)
 │   ├── news_verifier.py       # NLP verification (sentence-transformers + numpy fallback)
 │   ├── text_analysis.py       # Stdlib sentiment + tone analyzer
 │   ├── document_generator.py  # Word document generator
+│   ├── seed_bd_news.py        # Optional: seed extra Bangladeshi sources
 │   ├── database_schema.sql    # MySQL schema + seed data
 │   ├── requirements.txt       # Python dependencies (lean)
 │   ├── .env.example           # Environment variable template
