@@ -6,8 +6,11 @@ Flask-based REST API for authentication, categories, and news processing
 import json
 import logging
 import os
+import re
 import secrets
 import threading
+from collections import defaultdict
+from io import BytesIO
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any, Dict, Optional
@@ -176,8 +179,10 @@ def _fetch_articles(config: dict, engine: str, api_category: str,
     """
     Fetch articles using the configured provider.
 
-    Returns (articles, provider_used). 'auto' tries NewsAPI first and falls
-    back to the local crawler on quota errors, missing key, or empty results.
+    Returns (articles, provider_used). 'newsapi' and 'crawler' are pure; 'auto'
+    uses NewsAPI first and, when it returns thin results, supplements with the
+    on-device crawler and merges both (provider 'newsapi+crawler'). Falls back
+    to the crawler entirely on quota errors or a missing key.
     """
     from news_fetcher import NewsAPIQuotaError, NewsFetcherAgent
 
@@ -202,15 +207,44 @@ def _fetch_articles(config: dict, engine: str, api_category: str,
     try:
         fetcher = NewsFetcherAgent(api_key=api_key, max_items=max_items)
         articles = fetcher.fetch_news(api_category, hours=time_window)
-        if articles or engine == 'newsapi':
-            return articles, 'newsapi'
-        logger.info("NewsAPI returned no articles; falling back to local crawler")
-        return crawl(), 'crawler'
     except NewsAPIQuotaError as e:
         if engine == 'newsapi':
             raise
         logger.warning(f"NewsAPI quota hit ({e}); falling back to local crawler")
         return crawl(), 'crawler'
+
+    if engine == 'newsapi':
+        return articles, 'newsapi'
+
+    # auto: NewsAPI gave enough on its own
+    if len(articles) >= max(1, max_items // 2):
+        return articles, 'newsapi'
+
+    # auto: thin/empty NewsAPI result — supplement with the on-device crawler
+    crawled = crawl()
+    if not articles:
+        return crawled, 'crawler'
+    if not crawled:
+        return articles, 'newsapi'
+
+    merged = _merge_dedupe(articles, crawled, max_items)
+    logger.info("auto: merged %d NewsAPI + %d crawler -> %d articles",
+                len(articles), len(crawled), len(merged))
+    return merged, 'newsapi+crawler'
+
+
+def _merge_dedupe(primary: list, secondary: list, cap: int) -> list:
+    """Merge two article lists, primary first, de-duped by URL/title, capped"""
+    seen: set = set()
+    out: list = []
+    for article in list(primary) + list(secondary):
+        key = (getattr(article, 'url', '') or getattr(article, 'title', '') or '').strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(article)
+        if len(out) >= cap:
+            break
+    return out
 
 
 def process_job_background(job_id: str, category_name: str, sources: list,
@@ -999,45 +1033,22 @@ def job_copilot(job_id: str):
         if len(top_hits) >= 2:
             steps.append({'tool': 'compare_sources', 'detail': f"Compared {len(top_hits)} sources on this topic"})
 
-        # Try Ollama first
-        answer = None
-        config = load_config()
-        ollama_cfg = config.get('ollama', {})
-        try:
-            from news_crawler import OllamaClient
-            client = OllamaClient(
-                host=ollama_cfg.get('host', 'http://localhost:11434'),
-                model=ollama_cfg.get('model', 'gemma4:e4b'),
-                timeout=int(ollama_cfg.get('timeout_seconds', 60)),
+        # Deterministic answer composed from the retrieved articles. Gemma is
+        # reserved for news fetching/curation only and is intentionally not used
+        # here, so the copilot is fast, offline-safe, and grounded in report data.
+        if top_hits:
+            strongest = max(top_hits, key=lambda a: a.get('confidence', 0))
+            weakest = min(top_hits, key=lambda a: a.get('confidence', 0))
+            titles = "; ".join(f'"{a["title"][:50]}"' for a in top_hits[:3])
+            answer = (
+                f"Based on {len(top_hits)} retrieved article(s) — {titles} — "
+                f"the strongest corroboration comes from {strongest['source']} "
+                f"(confidence {strongest.get('confidence', 0):.2f}) and the weakest "
+                f"from {weakest['source']} (confidence {weakest.get('confidence', 0):.2f}). "
+                f"Cross-reference count: {sum(a.get('crossRefs', 0) for a in top_hits)}."
             )
-            if client.is_available():
-                context = "\n\n".join(
-                    f"[{a['source']}] {a['title']}: {a['excerpt']}"
-                    for a in top_hits
-                ) if top_hits else "No relevant articles found."
-                prompt = (
-                    f"You are a news analyst. A user asks: \"{message}\"\n\n"
-                    f"Relevant articles:\n{context}\n\n"
-                    "Answer concisely in 2-3 sentences, citing the sources above."
-                )
-                answer = client.generate(prompt)
-        except Exception as e:
-            logger.warning(f"Copilot Ollama call failed: {e}")
-
-        if not answer:
-            if top_hits:
-                strongest = max(top_hits, key=lambda a: a.get('confidence', 0))
-                weakest = min(top_hits, key=lambda a: a.get('confidence', 0))
-                titles = "; ".join(f'"{a["title"][:50]}"' for a in top_hits[:3])
-                answer = (
-                    f"Based on {len(top_hits)} retrieved article(s) — {titles} — "
-                    f"the strongest corroboration comes from {strongest['source']} "
-                    f"(confidence {strongest.get('confidence', 0):.2f}) and the weakest "
-                    f"from {weakest['source']} (confidence {weakest.get('confidence', 0):.2f}). "
-                    f"Cross-reference count: {sum(a.get('crossRefs', 0) for a in top_hits)}."
-                )
-            else:
-                answer = f"No articles in this report directly match your query: \"{message}\"."
+        else:
+            answer = f"No articles in this report directly match your query: \"{message}\"."
 
         return jsonify({'steps': steps, 'answer': answer}), 200
 
@@ -1049,12 +1060,12 @@ def job_copilot(job_id: str):
 # ============= Briefing =============
 
 def _build_briefing(user_id: int) -> dict:
-    """Gather recent complete jobs and build a briefing payload"""
-    from datetime import timezone
+    """
+    Gather recent complete jobs and build a briefing payload.
 
-    config = load_config()
-    ollama_cfg = config.get('ollama', {})
-
+    Fully deterministic — no model calls. Gemma is reserved for news
+    fetching/curation only, so the briefing is fast and offline-safe.
+    """
     # Collect articles from jobs completed in the last 7 days
     recent_jobs = Job.get_user_jobs(user_id, limit=20)
     now = datetime.now()
@@ -1096,20 +1107,6 @@ def _build_briefing(user_id: int) -> dict:
     # Pick top ~6 by confidence
     top = sorted(all_articles, key=lambda a: a.get('confidence', 0), reverse=True)[:6]
 
-    # Try Ollama for summaries
-    ollama_client = None
-    try:
-        from news_crawler import OllamaClient
-        client = OllamaClient(
-            host=ollama_cfg.get('host', 'http://localhost:11434'),
-            model=ollama_cfg.get('model', 'gemma4:e4b'),
-            timeout=int(ollama_cfg.get('timeout_seconds', 60)),
-        )
-        if client.is_available():
-            ollama_client = client
-    except Exception:
-        pass
-
     stories = []
     for story_idx, art in enumerate(top):
         excerpt = art.get('excerpt', '')
@@ -1118,27 +1115,11 @@ def _build_briefing(user_id: int) -> dict:
         category = art.get('_category', '')
         confidence = art.get('confidence', 0.0)
 
-        if ollama_client:
-            try:
-                sum_prompt = (
-                    f"Summarise this news article in exactly 2 sentences:\n"
-                    f"Title: {title}\nExcerpt: {excerpt[:400]}"
-                )
-                summary = ollama_client.generate(sum_prompt) or excerpt[:200]
-                why_prompt = (
-                    f"In one sentence, why does this story matter?\n"
-                    f"Title: {title}\nExcerpt: {excerpt[:300]}"
-                )
-                why = ollama_client.generate(why_prompt) or f"Reported by {source}."
-            except Exception:
-                summary = excerpt[:200] or title
-                why = f"Reported by {source}."
-        else:
-            summary = excerpt[:200] or title
-            why = (
-                f"Reported by {source} with {art.get('crossRefs', 0)} "
-                "corroborating source(s)."
-            )
+        summary = excerpt[:220] or title
+        why = (
+            f"Reported by {source} with {art.get('crossRefs', 0)} "
+            f"corroborating source(s) at {round(confidence * 100)}% confidence."
+        )
 
         stories.append({
             'id': f"brief-{story_idx}-{art.get('id', '')}",
@@ -1190,6 +1171,171 @@ def generate_briefing():
         return jsonify(_build_briefing(request.user_id)), 200
     except Exception as e:
         logger.error(f"Generate briefing error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============= Report Export =============
+
+@app.route('/api/jobs/<job_id>/export/<fmt>', methods=['GET'])
+@require_auth
+def export_report(job_id: str, fmt: str):
+    """Export a completed report as Markdown or JSON, built from stored article data"""
+    fmt = (fmt or '').lower()
+    if fmt not in ('md', 'json'):
+        return jsonify({'error': 'Unsupported format. Use md or json.'}), 400
+    try:
+        job = Job.get_by_job_id(job_id)
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        if job['user_id'] != request.user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        try:
+            articles = json.loads(job['articles_json']) if job.get('articles_json') else []
+        except (json.JSONDecodeError, TypeError):
+            articles = []
+        if not articles:
+            return jsonify({'error': 'No article data available for this report'}), 404
+
+        category = job.get('category_name', 'Report')
+        created = job.get('created_at')
+        created_str = created.isoformat() if hasattr(created, 'isoformat') else str(created or '')
+        total = job.get('articles_count') or len(articles)
+        verified = job.get('verified_count')
+        if verified is None:
+            verified = sum(1 for a in articles if a.get('confidence', 0) >= 0.7)
+        if job.get('avg_confidence') is not None:
+            avg_conf = float(job['avg_confidence'])
+        else:
+            avg_conf = round(sum(a.get('confidence', 0) for a in articles) / len(articles), 3)
+
+        if fmt == 'json':
+            payload = {
+                'job': {
+                    'id': job['job_id'],
+                    'category': category,
+                    'engine': job.get('engine') or 'auto',
+                    'createdAt': created_str,
+                    'articleCount': total,
+                    'verifiedCount': verified,
+                    'avgConfidence': avg_conf,
+                },
+                'articles': articles,
+            }
+            data = json.dumps(payload, indent=2, ensure_ascii=False)
+            mimetype, ext = 'application/json', 'json'
+        else:
+            lines = [
+                f"# {category} — Verified Brief",
+                "",
+                f"- Generated: {created_str}",
+                f"- Engine: {job.get('engine') or 'auto'}",
+                f"- Verified: {verified}/{total} · Avg confidence: {round(avg_conf * 100)}%",
+                "",
+                "---",
+                "",
+            ]
+            for a in articles:
+                lines.append(f"## {a.get('title', 'Untitled')}")
+                lines.append("")
+                lines.append(
+                    f"**{a.get('source', '')}** · confidence {round(a.get('confidence', 0) * 100)}% · "
+                    f"{a.get('crossRefs', 0)} cross-reference(s)"
+                )
+                if a.get('url'):
+                    lines.append(f"<{a['url']}>")
+                if a.get('excerpt'):
+                    lines.append("")
+                    lines.append(a['excerpt'])
+                lines.append("")
+            data = "\n".join(lines)
+            mimetype, ext = 'text/markdown', 'md'
+
+        safe_cat = re.sub(r'[^a-zA-Z0-9]+', '_', category).strip('_').lower() or 'report'
+        filename = f"neuzo_{safe_cat}_{job_id}.{ext}"
+        buf = BytesIO(data.encode('utf-8'))
+        return send_file(buf, mimetype=mimetype, as_attachment=True, download_name=filename)
+
+    except Exception as e:
+        logger.error(f"Export report error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# ============= Analytics =============
+
+@app.route('/api/analytics/coverage', methods=['GET'])
+@require_auth
+def analytics_coverage():
+    """Aggregate the user's completed reports into coverage analytics"""
+    try:
+        jobs = Job.get_user_jobs(request.user_id, 200)
+        cutoff = datetime.now() - timedelta(days=30)
+
+        tot_jobs = tot_articles = tot_verified = 0
+        conf_sum, conf_n = 0.0, 0
+        cat_roll: Dict[str, Dict[str, Any]] = {}
+        timeline: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: {'jobs': 0, 'articles': 0, 'verified': 0}
+        )
+
+        for job in jobs:
+            if job.get('status') != 'Complete':
+                continue
+            arts = job.get('articles_count') or 0
+            ver = job.get('verified_count') or 0
+            tot_jobs += 1
+            tot_articles += arts
+            tot_verified += ver
+            avg_c = float(job['avg_confidence']) if job.get('avg_confidence') is not None else None
+            if avg_c is not None:
+                conf_sum += avg_c
+                conf_n += 1
+
+            cat = job.get('category_name', 'Unknown')
+            r = cat_roll.setdefault(
+                cat,
+                {'category': cat, 'jobs': 0, 'articles': 0, 'verified': 0, '_cs': 0.0, '_cn': 0},
+            )
+            r['jobs'] += 1
+            r['articles'] += arts
+            r['verified'] += ver
+            if avg_c is not None:
+                r['_cs'] += avg_c
+                r['_cn'] += 1
+
+            created = job.get('created_at')
+            if hasattr(created, 'date') and created >= cutoff:
+                t = timeline[created.date().isoformat()]
+                t['jobs'] += 1
+                t['articles'] += arts
+                t['verified'] += ver
+
+        categories = sorted(
+            (
+                {
+                    'category': r['category'], 'jobs': r['jobs'], 'articles': r['articles'],
+                    'verified': r['verified'],
+                    'avgConfidence': round(r['_cs'] / r['_cn'], 3) if r['_cn'] else 0,
+                }
+                for r in cat_roll.values()
+            ),
+            key=lambda c: c['jobs'], reverse=True,
+        )
+        timeline_list = [
+            {'date': k, **v} for k, v in sorted(timeline.items())
+        ]
+
+        return jsonify({
+            'totals': {
+                'jobs': tot_jobs, 'articles': tot_articles, 'verified': tot_verified,
+                'avgConfidence': round(conf_sum / conf_n, 3) if conf_n else 0,
+            },
+            'categories': categories,
+            'timeline': timeline_list,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Analytics coverage error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 

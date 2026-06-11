@@ -184,11 +184,17 @@ class NewsVerificationAgent:
                 similarity_scores.append(similarity_score)
 
         # Scoring: base confidence for well-formed content, boosted by how
-        # strongly other outlets corroborate the story.
-        has_content = bool(article.title and article.description)
-
-        if has_content:
+        # strongly other outlets corroborate the story. Title-only articles
+        # (e.g. headlines scraped from feed-less sources) start lower but can
+        # still be verified through strong cross-corroboration.
+        if article.title and article.description:
             base_confidence = 0.6
+        elif article.title:
+            base_confidence = 0.5
+        else:
+            base_confidence = 0.0
+
+        if base_confidence > 0:
             if similarity_scores:
                 avg_similarity = float(np.mean(similarity_scores))
                 confidence = min(base_confidence + (avg_similarity * 0.4), 1.0)

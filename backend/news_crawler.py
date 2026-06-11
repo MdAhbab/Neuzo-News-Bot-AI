@@ -163,23 +163,44 @@ class LocalNewsCrawler:
         from_time = datetime.now() - timedelta(hours=hours)
 
         feed_urls: List[str] = []
+        feedless_sources: List[str] = []
         if sources:
             with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
                 futures = {pool.submit(self.discover_feeds, src): src for src in sources}
                 for future in as_completed(futures):
-                    feed_urls.extend(future.result())
+                    src = futures[future]
+                    found = future.result()
+                    if found:
+                        feed_urls.extend(found)
+                    else:
+                        feedless_sources.append(src)
 
-        if not feed_urls:
-            # Use curated category feeds when discovery yields nothing
+        used_curated = False
+        if not sources:
+            # No user sources at all → curated category feeds
             key = category.lower()
             feed_urls = RSS_FEEDS.get(key, RSS_FEEDS["general"])
+            used_curated = True
             logger.info("Using curated fallback feeds for category %s", category)
 
-        articles = self._fetch_feeds(feed_urls, from_time, max_entries=15)
+        articles: List[NewsArticle] = []
+        if feed_urls:
+            articles.extend(self._fetch_feeds(feed_urls, from_time, max_entries=15))
 
-        # Relax the time window if it filtered everything out
-        if not articles:
+        # HTML scraping fallback: sources that advertised no feed still yield headlines
+        if feedless_sources:
+            articles.extend(self._extract_from_sources(feedless_sources))
+
+        # Relax the time window if RSS filtered everything out
+        if not articles and feed_urls:
             articles = self._fetch_feeds(feed_urls, from_time=None, max_entries=10)
+
+        # Last resort: curated category feeds when user sources produced nothing
+        if not articles and not used_curated:
+            key = category.lower()
+            curated = RSS_FEEDS.get(key, RSS_FEEDS["general"])
+            logger.info("No articles from user sources; using curated feeds for %s", category)
+            articles = self._fetch_feeds(curated, from_time=None, max_entries=10)
 
         articles = self._dedupe(articles)
         articles.sort(key=lambda a: a.published_at or datetime.min, reverse=True)
@@ -201,6 +222,75 @@ class LocalNewsCrawler:
                        for url in feed_urls]
             for future in as_completed(futures):
                 articles.extend(future.result())
+        return articles
+
+    # ---------- HTML extraction (feed-less sources) ----------
+
+    def _extract_from_sources(self, sources: List[str]) -> List[NewsArticle]:
+        """Scrape headlines directly from sources that expose no RSS feed"""
+        articles: List[NewsArticle] = []
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            futures = [pool.submit(self._extract_html_articles, src, 12) for src in sources]
+            for future in as_completed(futures):
+                try:
+                    articles.extend(future.result())
+                except Exception as e:
+                    logger.debug("HTML extraction failed: %s", e)
+        return articles
+
+    @staticmethod
+    def _extract_html_articles(source_url: str, max_items: int = 12) -> List[NewsArticle]:
+        """
+        Best-effort headline extraction when a source has no feed. Pulls anchor
+        links that look like article headlines (inside <article>, headings, or
+        headline/title-class containers), keeps same-site links, dedupes, and
+        bounds the result. Descriptions are left empty; AI curation (when
+        available) fills them in, and the verifier handles title-only articles.
+        """
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            return []
+
+        url = source_url if "//" in source_url else f"https://{source_url}"
+        try:
+            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=8)
+            if not resp.ok:
+                return []
+        except requests.RequestException:
+            return []
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        domain = urlparse(url).netloc
+        source_name = domain.replace("www.", "")
+        parts = domain.split(".")
+        brand = parts[-2] if len(parts) >= 2 else domain
+
+        seen: set = set()
+        articles: List[NewsArticle] = []
+        selector = "article a, h1 a, h2 a, h3 a, [class*=headline] a, [class*=title] a"
+        for tag in soup.select(selector):
+            title = tag.get_text(strip=True)
+            href = tag.get("href")
+            if not title or not href or len(title) < 25:
+                continue
+            link = urljoin(url, href)
+            # Keep links that stay on the source's own domain
+            if brand not in link:
+                continue
+            key = link or title.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            articles.append(NewsArticle(
+                title=title, description="", url=link,
+                source=source_name, published_at=None, content="",
+            ))
+            if len(articles) >= max_items:
+                break
+
+        if articles:
+            logger.info("HTML extraction got %d headlines from %s", len(articles), domain)
         return articles
 
     @staticmethod
